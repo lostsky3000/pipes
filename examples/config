@@ -1,0 +1,10 @@
+
+boot_service = "boot"
+
+service_root = "examples"
+
+--worker_num = 2
+
+--timer_num = 2
+
+net_num = 1
