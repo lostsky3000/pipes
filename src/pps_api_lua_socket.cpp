@@ -4,7 +4,7 @@
 #include "pipes.h"
 #include "pps_service.h"
 #include "pps_worker.h"
-#include "pps_tcp_protocol.h"
+#include "tcp_protocol.h"
 #include <cstring>
 
 static int l_test(lua_State* L)
@@ -58,6 +58,65 @@ static int l_init(lua_State* L)
 	return 0;
 }
 
+static int parse_protocol(lua_State* L, int tbIdx, struct protocol_cfg** pCfgOut)
+{
+	int protocolType = PPSTCP_PROTOCOL_INVALID;
+	// check protocol type first
+	lua_pushnil(L);
+	while(lua_next(L, tbIdx) != 0){
+		int keyType = lua_type(L, -2);
+		int valType = lua_type(L, -1);
+		if(keyType == LUA_TSTRING){
+			const char* key = lua_tostring(L, -2);
+			if(strcmp(key, "type") == 0){   // parse type field
+				if(valType != LUA_TSTRING){
+					return luaL_error(L, "protocol type invalid: %d", valType);
+				}
+				const char* val = lua_tostring(L, -1);
+				if(!protocol_check_cfgtype(val, &protocolType)){
+					return luaL_error(L, "protocol unsupport: %s", val);
+				}
+			}
+		}
+		lua_pop(L, 1);
+	}
+	if(protocolType == PPSTCP_PROTOCOL_INVALID){
+		return luaL_error(L, "protocol type not specify");
+	}
+	// alloc cfg
+	struct protocol_cfg* pCfg = protocol_cfg_alloc(protocolType);
+	// check cfg detail
+	char errBuf[128];
+	lua_pushnil(L);
+	while (lua_next(L, tbIdx) != 0) {
+		int keyType = lua_type(L, -2);
+		int valType = lua_type(L, -1);
+		if (keyType == LUA_TSTRING) {
+			const char* key = lua_tostring(L, -2);
+			int valType = lua_type(L, -1);
+			int ret = -1;
+			if(valType == LUA_TSTRING){
+				ret = protocol_cfg_add_item_str(pCfg, key, lua_tostring(L, -1), errBuf, 128);
+			}else if(valType == LUA_TNUMBER){
+				ret = protocol_cfg_add_item_int(pCfg, key, (int)lua_tonumber(L, -1), errBuf, 128);
+			}else{
+				return luaL_error(L, "protocol cfg valType unsupport: key=%s, valType=%s", key, lua_typename(L, valType));
+			}
+			if(ret == -1){
+				protocol_cfg_free(pCfg);
+				return luaL_error(L, "%s", errBuf);
+			}
+		}
+		lua_pop(L, 1);
+	}
+	// check if cfg is all done
+	if(!protocol_cfg_whole_check(pCfg, errBuf, 128)){
+		protocol_cfg_free(pCfg);
+		return luaL_error(L, "%s", errBuf);
+	}
+	*pCfgOut = pCfg;
+	return 0;
+}
 static int l_listen(lua_State* L)
 {
 	// session, port, backlog, sendBuf, recvBuf, addrs
@@ -91,17 +150,7 @@ static int l_listen(lua_State* L)
 	}
 	recvBuf = recvBuf == 0 ? SOCK_RECV_BUF_MIN : recvBuf;
 	//
-	const char* strProtocol = luaL_checkstring(L, 6);
 	struct tcp_server_cfg cfgTcp;
-	if(strcmp(strProtocol, "raw") == 0){   // raw
-		cfgTcp.protocol = PPSTCP_PROTOCOL_RAW;
-	}
-	else if(strcmp(strProtocol, "websocket") == 0){  // websocket
-		cfgTcp.protocol = PPSTCP_PROTOCOL_WEBSOCKET;
-	}else{
-		return luaL_error(L, "listen() protocol invalid: %s", strProtocol);
-	}
-	//
 	int addrNum = argNum - 6;
 	if (addrNum > SOCK_TCP_LISTEN_ADDR_MAX) {
 		return luaL_error(L, "listen() addr num over limit: %d>%d", addrNum, SOCK_TCP_LISTEN_ADDR_MAX);
@@ -124,6 +173,21 @@ static int l_listen(lua_State* L)
 		}
 		cfgTcp.addrNum = addrNum;
 	}
+	// check protocol
+	int type = lua_type(L, 6);
+	if (type == LUA_TNIL) {
+		cfgTcp.protocolCfg = nullptr;
+	} else if (type == LUA_TTABLE) {
+		struct protocol_cfg* pCfg = nullptr;
+		parse_protocol(L, 6, &pCfg);
+		if (pCfg == nullptr) {
+			return luaL_error(L, "protocol invalid");
+		}
+		cfgTcp.protocolCfg = pCfg;
+	} else {
+		return luaL_error(L, "listen() protocolLuaType invalid: %d", type);
+	}
+	//
 	cfgTcp.port = port;
 	cfgTcp.backlog = backlog;
 	cfgTcp.sendBuf = sendBuf;
@@ -144,6 +208,7 @@ static int l_listen(lua_State* L)
 		return 1;
 	}
 	else {  //  send listenReq failed
+		protocol_cfg_free(cfgTcp.protocolCfg);
 		lua_pushboolean(L, false);
 		lua_pushinteger(L, ret);
 		return 2;

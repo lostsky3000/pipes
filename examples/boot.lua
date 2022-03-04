@@ -42,10 +42,10 @@ local port = 10086
 log.info('prepare to listen at ',port)
 
 local id,err = sock.listen(port, 
-{backlog=64,
+{backlog=64
 --bind={'192.168.0.24','127.0.0.1'}
-bind={'0.0.0.0'},
-protocol='websocket'
+,bind={'0.0.0.0'}
+--,protocol={type='websocket',uri='test'}
 },
 function(id,idListen) 
 	--local host, port = sock.remote(id)

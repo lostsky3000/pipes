@@ -77,14 +77,10 @@ function s.listen(port, args, cb)
 	local ss = _genCallId()
 	local ok,err
 	local bind = args.bind
-	local protocol = args.protocol
-	if not protocol then
-		protocol = 'raw'
-	end
 	if not bind then
-		ok, err = _cs.listen(ss,port,args.backlog,args.sendbuf,args.recvbuf,protocol)
+		ok, err = _cs.listen(ss,port,args.backlog,args.sendbuf,args.recvbuf,args.protocol)
 	elseif type(bind) == 'table' then
-		ok, err = _cs.listen(ss,port,args.backlog,args.sendbuf,args.recvbuf,protocol,table.unpack(bind))
+		ok, err = _cs.listen(ss,port,args.backlog,args.sendbuf,args.recvbuf,args.protocol,table.unpack(bind))
 	else
 		error('socket.listen bind list invalid')
 	end

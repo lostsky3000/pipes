@@ -35,7 +35,7 @@ int sock_poll(struct pps_net* net, int delay)
 		if(sock){
 			if(sock->main->pollInReg){   // reg pollIn
 				FD_SET(sock->fd, readSet);
-				printf("select tick, setReadSet, fd=%d\n", sock->fd);  // debug
+				//printf("select tick, setReadSet, fd=%d\n", sock->fd);  // debug
 			}
 			if(sock->main->pollOutReg){  // reg pollOut
 				FD_SET(sock->fd, sendSet);

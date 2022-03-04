@@ -28,7 +28,7 @@
 //
 #define SOCK_SEND_BUF_MIN 1024
 #define SOCK_SEND_BUF_MAX 4096
-#define SOCK_RECV_BUF_MIN 1024
+#define SOCK_RECV_BUF_MIN 4
 #define SOCK_RECV_BUF_MAX 8192
 #define SOCK_BACKLOG_DEF 128
 #define SOCK_BACKLOG_MAX 8192
@@ -326,7 +326,6 @@ struct socket_ctx
 	bool readOver4Net;
 	int16_t type;
 	int16_t idxNet;
-	int tcpProtocol;
 	//
 	int32_t idx;
 	std::atomic<uint32_t> cnt;

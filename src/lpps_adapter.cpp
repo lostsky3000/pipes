@@ -117,7 +117,7 @@ static void on_net_msg(struct net_msg*m, void* adapter, struct pps_service* s, s
 			case NETCMD_TCP_CONNIN:
 				{
 					struct tcp_conn_in* mIn = (struct tcp_conn_in*)m->buf;
-					printf("lua recv tcpConnIn, protocol=%d\n", mIn->protocol);  // debug
+					printf("lua recv tcpConnIn, protocol=%d\n", -1);  // debug
 					int32_t listenSockIdx = mIn->sockIdParent.idx;
 					uint32_t listenSockCnt = mIn->sockIdParent.cnt;
 					if (!net_is_listen_valid(lctx->svc->pipes, listenSockIdx, listenSockCnt)) { // listen sock has closed
@@ -368,7 +368,7 @@ static int on_lua_svc_start(struct lpps_svc_ctx* lctx, struct pps_service* s,
 		// destroy param
 		param_destroy(lctx);
 		if (r != LUA_OK) {
-			*errMsg = (char*)lua_tostring(L, -1);
+			//*errMsg = (char*)lua_tostring(L, -1);
 			ret = -3;
 			break;
 		}

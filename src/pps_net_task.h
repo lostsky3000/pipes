@@ -34,7 +34,7 @@ struct tcp_server_cfg
 	int sendBuf;
 	int recvBuf;
 	int addrNum;
-	int protocol;
+	struct protocol_cfg* protocolCfg;
 	SOCK_ADDR addrs[SOCK_TCP_LISTEN_ADDR_MAX];
 };
 struct netreq_tcp_listen
@@ -111,13 +111,11 @@ struct tcp_conn_in
 {
 	struct netmsg_src sockId;
 	struct netmsg_src sockIdParent;
-	int protocol;
 };
 struct tcp_read_wait_ret
 {
 	struct netmsg_src sockId;
 	int session;
-	int protocol;
 };
 struct tcp_conn_ret
 {
