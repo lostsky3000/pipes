@@ -363,10 +363,13 @@ end
 
 --
 function pps.newservice(src,...)
-	local id = _c.newservice(src,...)
+	local id = _c.newservice(src,1,...)
 	return id
 end
-
+function pps.exclusive(src,...)
+	local id = _c.newservice(src,2,...)
+	return id
+end
 function pps.unpack(ptr,sz)
 	return _cUnpackMsg(ptr,sz)
 end
@@ -382,6 +385,9 @@ function pps.exit()
 end
 function pps.id()
 	return _c.id()
+end
+function pps.shutdown()
+	_c.shutdown()
 end
 
 --

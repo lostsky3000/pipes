@@ -19,14 +19,13 @@
 #define SVC_MQTIMER_LEN 32
 #define SVC_MQNET_LEN 256
 
-
-
 //
 #define MAX_NET 16
 #define MAX_TIMER 16
 #define MAX_WORKER 256
 #define SVC_SLOT_NUM 65536
 #define MAX_SERVICE 60000
+#define MAX_EXCLUSIVE 1024
 
 //
 #define CB_STATUS_CREATE 1

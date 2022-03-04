@@ -170,6 +170,8 @@ static void thread_work(struct pps_timer* tmr)
 	}
 	// wait all extthread done
 	pps_wait_ext_thread_done(pipes);
+	//
+	exclusive_mgr_waitalldone(pipes->exclusiveMgr);
 	// decr loopExited num
 	pipes->loopExitedNum.fetch_add(1);
 	// wait all loop exit
@@ -178,6 +180,7 @@ static void thread_work(struct pps_timer* tmr)
 	}
 	//
 	cond_deinit(tmr->idleCond);
+	printf("timer(%d) end\n", tmr->index);
 }
 
 #if defined(USE_LINUX_TIMER)

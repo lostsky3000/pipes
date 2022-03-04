@@ -117,11 +117,14 @@ static void on_net_msg(struct net_msg*m, void* adapter, struct pps_service* s, s
 			case NETCMD_TCP_CONNIN:
 				{
 					struct tcp_conn_in* mIn = (struct tcp_conn_in*)m->buf;
+					printf("lua recv tcpConnIn, protocol=%d\n", mIn->protocol);  // debug
 					int32_t listenSockIdx = mIn->sockIdParent.idx;
 					uint32_t listenSockCnt = mIn->sockIdParent.cnt;
 					if (!net_is_listen_valid(lctx->svc->pipes, listenSockIdx, listenSockCnt)) { // listen sock has closed
+						net_close_sock(lctx->svc->pipes, mIn->sockId.idx, mIn->sockId.cnt);
 						return;
 					}
+					//
 					lua_pushinteger(L, NETCMD_TCP_CONNIN);
 					lua_pushinteger(L, listenSockIdx);
 					lua_pushinteger(L, listenSockCnt);
@@ -283,12 +286,12 @@ int lpps_onboot(void* ud, struct pipes* pipes)
 {
 	printf("lpps_onboot called\n");
 	//
-	int64_t id = lpps_newservice(pipes->config->boot_service, nullptr, 0, pipes, nullptr);
+	int64_t id = lpps_newservice(pipes->config->boot_service, nullptr, 0, pipes, nullptr, false);
 	assert(id >= 0);
 	return 1;	
 }
 int64_t lpps_newservice(const char* srcName, void*param, uint32_t szParam, 
-	struct pipes* pipes, struct pps_service* caller)
+	struct pipes* pipes, struct pps_service* caller, bool isExclusive)
 {
 	struct lpps_svc_ctx* lctx = new struct lpps_svc_ctx;
 	lctx->L = nullptr;
@@ -310,7 +313,7 @@ int64_t lpps_newservice(const char* srcName, void*param, uint32_t szParam,
 	svcUd.cbDeMsg = lpps_destroy_msg;
 	svcUd.userData = lctx;
 	uint32_t svcCnt = 0;
-	int32_t svcIdx = svc_newservice(pipes, &svcUd, &svcCnt, caller);
+	int32_t svcIdx = svc_newservice(pipes, &svcUd, &svcCnt, caller, 0, isExclusive);
 	if (svcIdx < 0) {   // get service failed
 		lctx_destroy(lctx);
 		return -1;

@@ -37,8 +37,8 @@ struct pps_service_ud
 struct pps_service
 {
 	bool exitCalled;
-	bool exited;
 	std::atomic<bool> onTask;
+	std::atomic<int16_t> calledCnt;
 	int32_t svcIdx;
 	std::atomic<uint32_t> svcCnt;
 	uint32_t svcCntLocal;
@@ -52,6 +52,7 @@ struct pps_service
 	struct mq_mpsc<struct net_msg>* mqNet;
 	struct pps_worker* curWorker;
 	bool* mqVisible4Timer;
+	struct exclusive_svc_ctx* exclusiveCtx;
 	// user logic
 	struct pps_service_ud ud;
 };
@@ -60,6 +61,8 @@ struct pps_service_mgr
 {
 	struct mq_mpmc<uint32_t>* quIdxFree;
 	struct mq_mpmc<uint32_t>* quIdxOri;
+	struct mq_mpmc<uint32_t>* quIdxFreeExclusive;
+	struct mq_mpmc<uint32_t>* quIdxOriExclusive;
 	struct pps_service slots[SVC_SLOT_NUM];
 };
 
@@ -74,7 +77,7 @@ static inline void svc_runtime_end(struct pps_service* s) {
 #define SVC_RT_END(pS_) svc_runtime_end(pS_);
 
 int32_t svc_newservice(struct pipes* pipes, struct pps_service_ud* ud, 
-	uint32_t* outSvcCnt, struct pps_service* caller, int32_t mqInCap=0);
+	uint32_t* outSvcCnt, struct pps_service* caller, int32_t mqInCap, bool exclusive);
 
 int32_t svc_sendmsg(uint32_t idxTo, struct pps_message* msg, struct pipes* pipes, struct pps_service* caller);
 
@@ -125,7 +128,35 @@ inline struct pps_service* svcmgr_get_svc(struct pps_service_mgr* mgr, uint32_t 
 	return nullptr;
 }
 
-
+//
+struct exclusive_svc_ctx
+{
+	std::atomic<bool> isIdle;
+	std::atomic<uint32_t> msgNum;
+	std::mutex mtx;
+	std::condition_variable cond;
+};
+struct exclusive_thread_ctx
+{
+	std::atomic<bool> loop;
+	struct pipes* pipes;
+	struct pps_worker* worker;
+	struct pps_service* svc;
+	struct exclusive_svc_ctx* svcCtx;
+};
+struct pps_exclusive_mgr
+{
+	bool shutdownCalled;
+	struct pipes* pipes;
+	std::mutex mtx;
+	struct pool_linked<struct exclusive_thread_ctx*>* plkCtx;
+};
+int exclusive_mgr_init(struct pps_exclusive_mgr* mgr, struct pipes* pipes);
+void exclusive_mgr_deinit(struct pps_exclusive_mgr* mgr);
+int exclusive_mgr_newsvc(struct pps_service* s, struct pps_exclusive_mgr* mgr);
+int exclusive_mgr_svcexit(struct exclusive_thread_ctx* ctx);
+void exclusive_mgr_waitalldone(struct pps_exclusive_mgr* mgr);
+void exclusive_mgr_shutdown(struct pps_exclusive_mgr* mgr);
 
 #endif // !PPS_SERVICE_H
 

@@ -47,8 +47,12 @@ do
 			log.info('recv close')
 			sock.close(sid)
 		elseif msg == 'closesvr' then
-			log.info('recv closeSvr')
+			log.info('recv closesvr')
 			sock.close(pid)
+			print('close svr 2')
+		elseif msg == 'shutdown' then
+			log.info('recv shutdown')
+			pps.shutdown()
 		end
 	else
 		if sz then

@@ -90,13 +90,17 @@ static int l_newservice(lua_State* L)
 {
 	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
 	const char* src = luaL_checkstring(L, 1);
+	int type = luaL_checkinteger(L, 2);
+	if(type != 1 && type != 2){
+		return luaL_error(L, "newservice error: type invalid: %d", type);
+	}
 	struct pps_service* svc = lctx->svc;
 	int argNum = lua_gettop(L);  // src, paramVars ...
 	//
 	uint32_t szParam = 0;
-	void* bufParam = pack_param(L, svc, 2, lua_gettop(L) - 1, LPPS_MTYPE_LUA, &szParam);
+	void* bufParam = pack_param(L, svc, 3, lua_gettop(L) - 2, LPPS_MTYPE_LUA, &szParam);
 	//
-	int64_t id = lpps_newservice(src, bufParam, szParam, svc->pipes, svc);
+	int64_t id = lpps_newservice(src, bufParam, szParam, svc->pipes, svc, type==2);
 	if (id >= 0) { // create svc succ
 		lua_pushnumber(L, id);
 	}
@@ -250,7 +254,6 @@ static int trans_args_to_str(lua_State* L, uint32_t* pSize, char** pData, struct
 	// calc size
 	uint32_t size = 0;
 	size_t sz;
-	
 	if(argNum > worker->arrPtrCharSize){
 		if(worker->arrPtrChar){
 			delete[] worker->arrPtrChar;
@@ -342,7 +345,12 @@ static int l_log(lua_State* L)
 	}
 	return 0;
 }
-
+static int l_shutdown(lua_State* L)
+{
+	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
+	pps_shutdown(lctx->svc->pipes);
+	return 0;
+}
 static int l_sleep(lua_State* L)	
 {
 	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
@@ -368,6 +376,7 @@ int luapps_api_openlib(lua_State* L)
 		{ "exit", l_exit },
 		{ "free", l_free },
 		{ "log", l_log },
+		{"shutdown", l_shutdown},
 		// debug
 		//{"sleep", l_sleep},
 		//

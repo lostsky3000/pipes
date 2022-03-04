@@ -326,6 +326,7 @@ struct socket_ctx
 	bool readOver4Net;
 	int16_t type;
 	int16_t idxNet;
+	int tcpProtocol;
 	//
 	int32_t idx;
 	std::atomic<uint32_t> cnt;

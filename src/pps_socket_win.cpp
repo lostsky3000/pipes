@@ -25,11 +25,12 @@ int sock_poll(struct pps_net* net, int delay)
 	FD_ZERO(readSet);
 	FD_ZERO(sendSet);
 	FD_ZERO(exceptSet);
-	int sockNum = poll->sockNum;
+	int sockNumOri = poll->sockNum;
+	int sockNumCnt = sockNumOri;
 	// set fdset
 	//printf("select_tick, setFds, sockNum=%d\n",sockNum);  // debug
 	struct socket_sockctx* sock;
-	for (int i = 0; i <sockNum; ++i) {
+	for (int i = 0; i <WIN_SOCK_MAX; ++i) {
 		sock = poll->arrSockCtx[i];
 		if(sock){
 			if(sock->main->pollInReg){   // reg pollIn
@@ -41,6 +42,9 @@ int sock_poll(struct pps_net* net, int delay)
 			}
 			if(sock->type == SOCKCTX_TYPE_TCP_CONN_WAIT){
 				FD_SET(sock->fd, exceptSet);
+			}
+			if(--sockNumCnt < 1){
+				break;
 			}
 		}
 	}
@@ -54,7 +58,7 @@ int sock_poll(struct pps_net* net, int delay)
 		tmOut->tv_usec = (delay % 1000) * 1000;
 		ret = select(WIN_SOCK_MAX, readSet, sendSet, exceptSet, tmOut);
 	}
-	printf("select tick, sockNum=%d, ret=%d, delay=%d\n", sockNum, ret, delay);
+	//printf("select tick, sockNum=%d, ret=%d, delay=%d\n", poll->sockNum, ret, delay);
 	if(ret < 1){   // nothing happened
 		if(ret == SOCKET_ERROR){
 			int err = WSAGetLastError();
@@ -63,8 +67,9 @@ int sock_poll(struct pps_net* net, int delay)
 		return 0;
 	}
 	//
+	sockNumCnt = sockNumOri;
 	struct ST_POLL_RUNTIME* rt = net->pollRuntime;
-	for (int i = 0; i < sockNum; ++i) {
+	for (int i = 0; i < WIN_SOCK_MAX; ++i) {
 		sock = poll->arrSockCtx[i];
 		if (sock == nullptr) {
 			continue;
@@ -103,6 +108,9 @@ int sock_poll(struct pps_net* net, int delay)
 				getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, (char*)&soErr, &soErrLen);
 				net->cbTcpConnWait(net, sock, trans_conn_err(soErr));
 			}
+		}
+		if (--sockNumCnt < 1) {
+			break;
 		}
 	}
 	return 1;
@@ -377,6 +385,7 @@ int sock_event_notify(SOCK_EVENT_FD* ptr)
 	char ch;
 	if (send(fd, &ch, 1, 0) == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK) {
 		while (send(fd, &ch, 1, 0) == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK) {
+			int n = 1;
 		}
 	}
 	return 1;

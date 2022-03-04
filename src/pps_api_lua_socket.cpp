@@ -4,6 +4,7 @@
 #include "pipes.h"
 #include "pps_service.h"
 #include "pps_worker.h"
+#include "pps_tcp_protocol.h"
 #include <cstring>
 
 static int l_test(lua_State* L)
@@ -61,7 +62,7 @@ static int l_listen(lua_State* L)
 {
 	// session, port, backlog, sendBuf, recvBuf, addrs
 	int argNum = lua_gettop(L);
-	if (argNum < 5) {
+	if (argNum < 6) {
 		return luaL_error(L, "listen() args num invalid: %d", argNum);
 	}
 	int session = luaL_checkinteger(L, 1);
@@ -90,18 +91,28 @@ static int l_listen(lua_State* L)
 	}
 	recvBuf = recvBuf == 0 ? SOCK_RECV_BUF_MIN : recvBuf;
 	//
-	int addrNum = argNum - 5;
+	const char* strProtocol = luaL_checkstring(L, 6);
+	struct tcp_server_cfg cfgTcp;
+	if(strcmp(strProtocol, "raw") == 0){   // raw
+		cfgTcp.protocol = PPSTCP_PROTOCOL_RAW;
+	}
+	else if(strcmp(strProtocol, "websocket") == 0){  // websocket
+		cfgTcp.protocol = PPSTCP_PROTOCOL_WEBSOCKET;
+	}else{
+		return luaL_error(L, "listen() protocol invalid: %s", strProtocol);
+	}
+	//
+	int addrNum = argNum - 6;
 	if (addrNum > SOCK_TCP_LISTEN_ADDR_MAX) {
 		return luaL_error(L, "listen() addr num over limit: %d>%d", addrNum, SOCK_TCP_LISTEN_ADDR_MAX);
 	}
-	struct tcp_server_cfg cfgTcp;
 	if (addrNum <= 0) {   //  not specify addr list, use localhost
 		sock_addr_pton(&cfgTcp.addrs[0], "127.0.0.1");
 		cfgTcp.addrNum = 1;
 	}
 	else {
 		for (int i=0; i<addrNum; ++i) {
-			const char * strAddr = luaL_checkstring(L, i + 6);
+			const char * strAddr = luaL_checkstring(L, i + 7);
 			if (strAddr) {
 				if (!sock_addr_pton(&cfgTcp.addrs[i], strAddr)) {
 					return luaL_error(L, "listen() addr invalid: %s", strAddr);

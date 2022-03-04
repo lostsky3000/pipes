@@ -14,9 +14,11 @@ log.info('boot service start', true, 123, 88.99)
 --local n = table.unpack(nil)
 
 --local test2 = pps.newservice('test_2')
-
 --local test3 = pps.newservice('test_3')
 
+--local db1 = pps.exclusive('db_test')
+--pps.sleep(2000)
+--local db2 = pps.exclusive('db_test')
 --[[
 pps.sleep(1000)
 
@@ -42,7 +44,8 @@ log.info('prepare to listen at ',port)
 local id,err = sock.listen(port, 
 {backlog=64,
 --bind={'192.168.0.24','127.0.0.1'}
-bind={'0.0.0.0'}
+bind={'0.0.0.0'},
+protocol='websocket'
 },
 function(id,idListen) 
 	--local host, port = sock.remote(id)

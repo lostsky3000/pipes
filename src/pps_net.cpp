@@ -90,7 +90,7 @@ static inline int del_net_fd(struct pps_net* net, SOCK_FD* pFd)
 }
 static inline void recycle_ctx(struct pps_net* net, struct socket_ctx* ctx) {
 	uint32_t preCnt = ctx->cnt.fetch_add(1, std::memory_order_relaxed);
-	printf("recycle_ctx(), preCnt=%d\n", preCnt);  //debug
+	printf("recycle_ctx(), idx=%d, preCnt=%d\n", ctx->idx, preCnt);  //debug
 	plk_push(net->queWaitRecycleSock, ctx->idx);
 	++net->waitRecycleSockNum;	
 }
@@ -102,7 +102,6 @@ static inline int close_ctx_fd(struct pps_net* net, struct socket_ctx* ctx)
 	del_net_fd(net, &sock->fd);
 	return 1;
 }
-
 
 static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 {
@@ -204,6 +203,7 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 			ret.session = ctx->src.session;
 			ret.sockId.idx = ctx->idx;
 			ret.sockId.cnt = ctx->cnt4Net;
+			ret.protocol = ctx->tcpProtocol;
 			send_readnotify_to_svc(net, &ctx->src, &ret);
 		}
 	}
@@ -295,6 +295,7 @@ static bool do_send_wait(struct netreq_src* src, struct pps_net* net);
 
 void net_thread(struct pps_net* net)
 {
+	printf("net(%d) start\n", net->index);  // debug
 	struct pipes* pipes = net->pipes;
 	uint32_t totalLoopNum = pipes->totalLoopThread.load();
 	// add eventfd to poll
@@ -452,6 +453,8 @@ void net_thread(struct pps_net* net)
 	}
 	// wait all extthread done
 	pps_wait_ext_thread_done(pipes);
+	//
+	exclusive_mgr_waitalldone(pipes->exclusiveMgr);
 	// decr loopExited num
 	pipes->loopExitedNum.fetch_add(1, std::memory_order_relaxed);
 	// wait all loop exit
@@ -477,22 +480,24 @@ void net_thread(struct pps_net* net)
 			sock_fd_close(&info->fd);
 		}
 	}
+	printf("net(%d) end\n", net->index);  // debug
 }
 
 static inline struct socket_ctx* get_valid_sock(struct socket_mgr* mgr, int idx, uint32_t cnt);
 static bool do_tcp_add(struct netreq_src* src, struct pps_net* net, struct tcp_add_info* info)
 {
 	struct socket_ctx* ctx = sock_get_ctx(net->sockMgr, src->idx);
-	printf("do_tcp_add(), fd=%d\n", ctx->socks[0].fd);   // debug
 	add_net_fd(net, &ctx->socks[0].fd);
 	SOCK_RT_BEGIN(ctx);
 	sock_poll_init_tcpfd(&ctx->socks[0], ctx->sendBufLen, ctx->recvBufLen);
 	bool bo = ctx->closeCalled4Net;
+	printf("do_tcp_add(), fd=%d, tcpProtocol=%d\n", ctx->socks[0].fd, ctx->tcpProtocol);   // debug
 	bo = ctx->readOver4Net;
 	ctx->pollInReg = true;
 	ctx->pollOutReg = false;
 	poll_evt_add(net->pollFd, &ctx->socks[0]);
 	SOCK_RT_END(ctx);
+	int iTmp = ctx->tcpProtocol;
 	// ensure read-runtime visible begin
 	sock_read_atom_acquire(ctx);
 	struct read_runtime* run = &ctx->readRuntime;
@@ -517,6 +522,7 @@ static bool do_tcp_add(struct netreq_src* src, struct pps_net* net, struct tcp_a
 	m.sockId.cnt = ctx->cnt4Net;
 	m.sockIdParent.idx = info->parentIdx;
 	m.sockIdParent.cnt = info->parentCnt;
+	m.protocol = ctx->tcpProtocol;
 	wrap_svc_msg(net->pNetMsgOri, &info->src, NETCMD_TCP_CONNIN, &m, sizeof(m));
 	int sendRet = send_to_svc(net->pNetMsgOri, net, true);
 	if (sendRet < 0) {   // dst svc has gone
@@ -568,6 +574,7 @@ static bool do_tcp_listen(struct netreq_src* src, struct tcp_server_cfg* cfg, st
 		ctx->idxNet = net->index;
 		ctx->src = *src;
 		ctx->cnt4Net = ctx->cnt.load(std::memory_order_relaxed);
+		ctx->closeCalled4Net = false;
 		SOCK_RT_END(ctx);
 		//
 		send_runtime_init(ctx, cfgCp->sendBuf, ctx->cnt4Net);
@@ -606,6 +613,7 @@ static bool do_read_wait(struct netreq_src* src, struct tcp_read_wait* req, stru
 		ret.session = src->session;
 		ret.sockId.idx = req->sockId.idx;
 		ret.sockId.cnt = req->sockId.cnt;
+		ret.protocol = ctx->tcpProtocol;
 		send_readnotify_to_svc(net, src, &ret);
 		return true;
 	}
@@ -676,8 +684,10 @@ static bool do_tcp_close(struct netreq_src* src, struct pps_net* net)
 		return false;
 	}
 	SOCK_RT_BEGIN(ctx);
+	//printf("do_tcp_close() called, idx=%d, cnt=%d\n", src->idx, src->cnt);  // debug
 	if (ctx->closeCalled4Net) {	// duplicate called!! impossible
-		printf("WARNING!!! do_tcp_close() duplicate called!\n");    // debug
+		printf("WARNING!!! do_tcp_close() duplicate called! called=%d, idx=%d, cnt=%d\n",
+			ctx->closeCalled4Net, src->idx, src->cnt);    // debug
 		return false;
 	}
 	ctx->closeCalled4Net = true;
@@ -711,6 +721,7 @@ static bool do_tcp_close(struct netreq_src* src, struct pps_net* net)
 			ret.session = ctx->src.session;
 			ret.sockId.idx = ctx->idx;
 			ret.sockId.cnt = ctx->cnt4Net;
+			ret.protocol = ctx->tcpProtocol;
 			send_readnotify_to_svc(net, &ctx->src, &ret);
 		}
 	} else if (ctx->type == SOCKCTX_TYPE_TCP_LISTEN) {
@@ -852,12 +863,14 @@ static int on_tcp_accept(struct pps_net* net, struct socket_sockctx* sock, SOCK_
 {
 	struct socket_ctx* mainCtx = sock->main;
 	struct tcp_server_cfg* svrCfg = (struct tcp_server_cfg*)mainCtx->ud;
+	/*
 	// debug begin
 	sock_addr_ntop(addrRemote, net->bufAddr, SOCK_ADDR_STRLEN);
 	printf("on_tcp_accept, newConnIn: %s:%d\n", net->bufAddr, portRemote);
 	sock_addr_ntop(&svrCfg->addrs[sock->idx], net->bufAddr, SOCK_ADDR_STRLEN);
 	printf("newConn accept by %s:%d\n", net->bufAddr, svrCfg->port);
 	// debug end
+	*/
 	int32_t idxCtx = sock_slot_alloc(net->sockMgr);
 	if (idxCtx < 0) {   // no more free slot
 		printf("on_tcp_accept(), no more sockCtxSlot to alloc\n");   // debug
@@ -868,7 +881,9 @@ static int on_tcp_accept(struct pps_net* net, struct socket_sockctx* sock, SOCK_
 	SOCK_RT_BEGIN(ctxDst);
 	init_tcp_channel_ctx(netDst, ctxDst, svrCfg->sendBuf, svrCfg->recvBuf, 
 		&fd, addrRemote, portRemote);
+	ctxDst->tcpProtocol = svrCfg->protocol;
 	SOCK_RT_END(ctxDst);
+	printf("on_tcp_accept(), idx=%d, cnt=%d, fd=%d\n", ctxDst->idx, ctxDst->cnt4Net, fd);  // debug
 	// send to net
 	struct tcp_add_info info;
 	info.src = mainCtx->src;
@@ -1174,6 +1189,7 @@ int net_close_sock(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt)
 		return 0;
 	}
 	run->closeCalled4Svc = true;
+	//printf("sockCloseTrace: idx=%d, cnt=%d", sockIdx, sockCnt);  //debug
 	sock_read_atom_release(ctx);  // make closeCalled=true visible for read()
 	run->sockCnt = ctx->cnt4Net + 1;      // stop follow send() and close()
 	sock_send_unlock(ctx);
@@ -1676,6 +1692,7 @@ int net_tcp_listen(struct netreq_src* src, struct pipes* pipes, struct tcp_serve
 static void enreq_net_shutdown(struct net_task_req* t, struct netreq_tcp_shutdown* req)
 {
 	t->cmd = NETCMD_SHUTDOWN;
+	t->szBuf = 0;
 }
 void net_shutdown(struct pipes* pipes)
 {
@@ -1879,7 +1896,9 @@ static void fn_pop_net_req(struct net_task_req* src, struct net_task_req* dst)
 	dst->src = src->src;
 	dst->cmd = src->cmd;
 	dst->szBuf = src->szBuf;
-	memcpy(dst->buf, src->buf, src->szBuf);
+	if(src->szBuf > 0){
+		memcpy(dst->buf, src->buf, src->szBuf);
+	}
 }
 //
 static int conn_wait_compare(struct conn_wait_info* v1, struct conn_wait_info* v2)

@@ -77,10 +77,14 @@ function s.listen(port, args, cb)
 	local ss = _genCallId()
 	local ok,err
 	local bind = args.bind
+	local protocol = args.protocol
+	if not protocol then
+		protocol = 'raw'
+	end
 	if not bind then
-		ok, err = _cs.listen(ss,port,args.backlog,args.sendbuf,args.recvbuf)
+		ok, err = _cs.listen(ss,port,args.backlog,args.sendbuf,args.recvbuf,protocol)
 	elseif type(bind) == 'table' then
-		ok, err = _cs.listen(ss,port,args.backlog,args.sendbuf,args.recvbuf,table.unpack(bind))
+		ok, err = _cs.listen(ss,port,args.backlog,args.sendbuf,args.recvbuf,protocol,table.unpack(bind))
 	else
 		error('socket.listen bind list invalid')
 	end
@@ -237,7 +241,7 @@ function(cmd,ss,...)
 			_listens[sockKey] = {_cb=ctx.cb,_port=ctx.port,_id=sockId}
 			ok,err = _coResumeKey(key, sockId)
 		else  -- listen failed
-			ok,err = _coResumeKey(key, false, 'listen failed: '..tb[2])
+			ok,err = _coResumeKey(key, false, 'server failed: '..tb[2])
 		end
 		if not ok then
 			pps._procError(err)

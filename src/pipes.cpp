@@ -105,6 +105,8 @@ l_deinit(lua_State* L)
 			sockmgr_deinit_main_thread(sockMgr);
 			delete sockMgr;
 		}
+		// destroy exclusive-mgr
+		exclusive_mgr_deinit(pipes->exclusiveMgr);
 		// destroy service-mgr
 		svcmgr_destroy(pipes->serviceMgr);
 		// destroy logger
@@ -129,6 +131,9 @@ static int pipes_init(struct pipes* pipes)
 		pipes->tmStart = new timer_clock_point;
 		// init service-mgr
 		pipes->serviceMgr = const_cast<struct pps_service_mgr*>(svcmgr_create(pipes));
+		// init exclusive-mgr
+		pipes->exclusiveMgr = new struct pps_exclusive_mgr;
+		assert(exclusive_mgr_init(pipes->exclusiveMgr, pipes));
 		// init logger
 		pipes->logger = new struct pps_logger;
 		logger_init_main_thread(pipes->logger, pipes);
@@ -284,6 +289,8 @@ int pps_shutdown(struct pipes* pipes)
 	if (!pipes->hasShutdown.compare_exchange_strong(preState, true)) {  // dup called shutdown
 		return 0;
 	}
+	// stop all exclusive event loop
+	exclusive_mgr_shutdown(pipes->exclusiveMgr);
 	// stop all workers event loop
 	worker_shutdown(pipes);
 	// stop all timer event loop

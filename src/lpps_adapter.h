@@ -78,7 +78,7 @@ struct lpps_svc_ctx
 };
 
 int64_t lpps_newservice(const char* srcName, void*param, 
-			uint32_t szParam, struct pipes*pipes, struct pps_service* caller);
+			uint32_t szParam, struct pipes*pipes, struct pps_service* caller, bool isExclusive);
 
 int lpps_onboot(void* ud, struct pipes* pipes);
 

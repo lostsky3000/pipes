@@ -18,6 +18,7 @@ struct pps_net;
 struct pps_service_mgr;
 struct socket_mgr;
 struct timer_clock_point;
+struct pps_exclusive_mgr;
 
 struct pps_boot_ud
 {
@@ -29,7 +30,7 @@ struct pipes
 {
 	std::atomic<bool> hasShutdown;
 	std::atomic<uint32_t> svcWorkerCnt;
-	std::atomic<uint32_t> totalTask;
+	std::atomic<uint32_t> totalWorkerTask;
 	std::atomic<int32_t> idleWorkerNum;
 	std::atomic<int32_t> totalService;
 	//
@@ -47,6 +48,7 @@ struct pipes
 	struct pps_logger* logger;
 	struct pps_service_mgr* serviceMgr;
 	struct socket_mgr* sockMgr;
+	struct pps_exclusive_mgr* exclusiveMgr;
 	//
 	struct timer_clock_point* tmStart;
 	//
@@ -57,7 +59,7 @@ struct pipes
 	//
 	pipes()
 		: svcWorkerCnt(0)
-		, totalTask(0)
+		, totalWorkerTask(0)
 		, idleWorkerNum(0)
 		, totalLoopThread(0)
 		, loopStartedNum(0)
