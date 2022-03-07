@@ -2,6 +2,7 @@
 #define PPS_NET_TASK_H
 
 #include <cstdint>
+#include "pps_socket_plat.h"
 
 #define NETCMD_TCP_LISTEN 1
 #define NETCMD_TCP_CONNIN 2

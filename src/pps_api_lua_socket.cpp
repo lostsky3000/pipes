@@ -1,6 +1,6 @@
 #include "pps_api_lua_socket.h"
 #include "lpps_adapter.h"
-#include "pps_net.h"
+#include "pps_net_api.h"
 #include "pipes.h"
 #include "pps_service.h"
 #include "pps_worker.h"
@@ -39,7 +39,7 @@ static int l_test(lua_State* L)
 	src.idx = 1;
 	src.cnt = 2;
 	
-	ret = net_tcp_listen(&src, pipes, &cfg);
+	ret = netapi_tcp_listen(&src, pipes, &cfg);
 	if (ret == 0) {  // listen succ
 		lua_pushstring(L, "succ");
 		return 1;
@@ -202,7 +202,7 @@ static int l_listen(lua_State* L)
 	src.cnt = s->svcCntLocal;
 	src.session = session;
 	//
-	int ret = net_tcp_listen(&src, pipes, &cfgTcp);
+	int ret = netapi_tcp_listen(&src, pipes, &cfgTcp);
 	if (ret == 0) {   // send listenReq succ
 		lua_pushboolean(L, true);
 		return 1;
@@ -261,7 +261,7 @@ static int l_connect(lua_State* L)
 	cfg.sendBuf = sendBuf;
 	cfg.recvBuf = recvBuf;
 	//
-	net_tcp_connect(&src, s->pipes, &cfg);
+	netapi_tcp_connect(&src, s->pipes, &cfg);
 	
 	return 0;
 }
@@ -274,7 +274,7 @@ static int l_addr(lua_State* L)
 	struct pps_service* s = lctx->svc;
 	int port;
 	char* buf = s->curWorker->tmpBuf.buf;
-	if (net_get_remote(s->pipes, idx, cnt, buf, s->curWorker->tmpBuf.cap, &port)) { // succ
+	if (netapi_get_remote(s->pipes, idx, cnt, buf, s->curWorker->tmpBuf.cap, &port)) { // succ
 		lua_pushstring(L, buf);
 		lua_pushinteger(L, port);
 		return 2;
@@ -290,7 +290,7 @@ static int l_close(lua_State* L)
 	int sockIdx = luaL_checkinteger(L, 1);
 	int sockCnt = luaL_checkinteger(L, 2);
 	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
-	net_close_sock(lctx->svc->pipes, sockIdx, sockCnt);
+	netapi_close_sock(lctx->svc->pipes, sockIdx, sockCnt);
 	return 0;
 }
 
@@ -324,7 +324,7 @@ static int l_read(lua_State* L)
 		struct dec_arg_len a;
 		a.readLen = readLen;
 		arg.decArg = &a;
-		ret = net_tcp_read(s->pipes, sockIdx, sockCnt, &arg, &trunc);
+		ret = netapi_tcp_read(s->pipes, sockIdx, sockCnt, &arg, &trunc);
 	}
 	else if (decType == DECTYPE_SEP) {
 		size_t slen = 0;
@@ -341,7 +341,7 @@ static int l_read(lua_State* L)
 		a.sep = (char*)sep;
 		a.sepLen = slen;
 		arg.decArg = &a;
-		ret = net_tcp_read(s->pipes, sockIdx, sockCnt, &arg, &trunc);
+		ret = netapi_tcp_read(s->pipes, sockIdx, sockCnt, &arg, &trunc);
 	}
 	else {
 		int readMax = luaL_checkinteger(L, 5);
@@ -349,7 +349,7 @@ static int l_read(lua_State* L)
 			return luaL_error(L, "read, packmax invalid: %d", readMax);
 		}
 		arg.maxRead = readMax;
-		ret = net_tcp_read(s->pipes, sockIdx, sockCnt, &arg, &trunc);
+		ret = netapi_tcp_read(s->pipes, sockIdx, sockCnt, &arg, &trunc);
 	} 
 	//
 	if (ret > 0) {   // read sth
@@ -390,7 +390,7 @@ static int l_send(lua_State* L)
 	}
 	// do send
 	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
-	int ret = net_tcp_send(lctx->svc->pipes, sockIdx, sockCnt, data, sz);
+	int ret = netapi_tcp_send(lctx->svc->pipes, sockIdx, sockCnt, data, sz);
 	lua_pushinteger(L, ret);
 	return 1;
 }

@@ -1,7 +1,6 @@
 #ifndef PPS_SOCKET_H
 #define PPS_SOCKET_H
-#include "pps_socket_epoll.h"
-#include "pps_socket_win.h"
+
 
 #include <cstdint>
 #include <atomic>
@@ -11,20 +10,10 @@
 #include "pps_net_task.h"
 #include "pool_linked.h"
 #include "pps_malloc.h"
-
-#ifdef WIN_SOCK_MAX
-#define SOCK_CTX_SLOT_NUM WIN_SOCK_MAX+1024
-#define MAX_SOCK_CTX WIN_SOCK_MAX
-#else
-#define SOCK_CTX_SLOT_NUM 65536
-#define MAX_SOCK_CTX 65000
-#endif // WIN_SOCK_MAX
-
-
+#include "pps_socket_plat.h"
 
 
 #define SOCK_ADDR_STRLEN 16
-
 //
 #define SOCK_SEND_BUF_MIN 1024
 #define SOCK_SEND_BUF_MAX 4096
@@ -58,8 +47,7 @@
 #define DECTYPE_NOW 0
 #define DECTYPE_LEN 1
 #define DECTYPE_SEP 2
-#define DECTYPE_ALL 3
-#define TCP_DEC_NUM 4
+#define TCP_DEC_NUM 3
 
 typedef int(*CB_DEC_ON_READ)(int total, int cur, char* buf, int size, void*ud);
 
@@ -89,10 +77,6 @@ struct read_decode_sep
 	char* sep;
 	struct read_buf_block* seekBuf;
 	int seekBufPos;
-};
-struct read_decode_all
-{
-	struct read_decode head;
 };
 
 struct dec_arg_len
@@ -370,6 +354,19 @@ inline struct socket_ctx* sock_get_ctx(struct socket_mgr* mgr, uint32_t idx)
 {
 	return &mgr->ctxPool[idx];	
 }
+inline struct socket_ctx* sock_valid_ctx(struct socket_mgr* mgr, int idx, uint32_t cnt)
+{
+	if (idx < 0 || idx >= SOCK_CTX_SLOT_NUM) {
+		return nullptr;
+	}
+	struct socket_ctx* ctx = &mgr->ctxPool[idx];
+	if (ctx) {
+		if (cnt != ctx->cnt.load(std::memory_order_acquire)) {   // SOCK_RT_BEGIN
+			return nullptr;
+		}
+	}
+	return ctx;
+}
 inline void sock_rt_begin(struct socket_ctx* ctx) {
 	ctx->cnt.load(std::memory_order_acquire);
 }
@@ -457,6 +454,15 @@ int sock_tcp_connect_nonblock(struct tcp_connect_cfg* cfg, SOCK_FD* pFd, SOCK_AD
 int sock_poll(struct pps_net* net, int delay);
 
 
+// func 4 readDec
+typedef int(*FN_READDEC_INIT)(struct read_runtime* run, struct read_arg* arg);
+int sockdec_init_now(struct read_runtime* run, struct read_arg* arg);
+int sockdec_init_len(struct read_runtime* run, struct read_arg* arg);
+int sockdec_init_sep(struct read_runtime* run, struct read_arg* arg);
+typedef int(*FN_READDEC_READ)(struct read_runtime* run, int* notifyReadable, int* trunc);
+int sockdec_read_sep(struct read_runtime* run, int* waitReadable, int* trunc);
+int sockdec_read_len(struct read_runtime* run, int* waitReadable, int* trunc);
+int sockdec_read_now(struct read_runtime* run, int* waitReadable, int* trunc);
 
 #endif // !PPS_SOCKET_H
 

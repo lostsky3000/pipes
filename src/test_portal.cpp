@@ -1212,7 +1212,7 @@ static void spsc_thread(int idx)
 	int total = 100000000;
 	int cnt;
 	if(idx == 0){   // consumer
-		spsc_read_thread_init(s_mqSpsc);
+		spsc_read_thread_acquire(s_mqSpsc);
  		cnt = 0;
 		int val;
 		while(true){
@@ -1233,7 +1233,7 @@ static void spsc_thread(int idx)
 		}
 		printf("spsc_thread consumer done\n");
 	}else{  // producer
-		spsc_write_thread_init(s_mqSpsc);
+		spsc_write_thread_acquire(s_mqSpsc);
 		std::this_thread::sleep_for(std::chrono::milliseconds(200));
 		cnt = 0;
 		while(cnt < total){

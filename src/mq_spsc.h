@@ -167,7 +167,7 @@ int spsc_pop(struct mq_spsc<T>*q, T* wrap, uint32_t* pLeft=nullptr)
 template<typename T>
 uint32_t spsc_size(struct mq_spsc<T>* q)
 {
-	return q->readable.load(std::memory_order_acquire);
+	return q->readable.load(std::memory_order_relaxed);
 }
 
 template<typename T>
@@ -191,22 +191,22 @@ struct mq_spsc<T>* spsc_create(uint32_t blockSize)
 template<typename T>
 void spsc_destroy(struct mq_spsc<T>* q)
 {
-	
+
 	delete q;
 }
 
 template<typename T>
-void spsc_read_thread_init(struct mq_spsc<T>*q)	
+void spsc_read_thread_acquire(struct mq_spsc<T>*q)	
 {
 	q->readable.load(std::memory_order_acquire);
-	uint32_t ui = q->blockRead->idxRead;
+	//uint32_t ui = q->blockRead->idxRead;
 }
 template<typename T>
-void spsc_write_thread_init(struct mq_spsc<T>*q)	
+void spsc_write_thread_acquire(struct mq_spsc<T>*q)	
 {
 	q->readable.load(std::memory_order_acquire);
-	uint32_t ui = q->blockWrite->idxWrite;
-	ui = q->writeBlockIdx;
+	//uint32_t ui = q->blockWrite->idxWrite;
+	//ui = q->writeBlockIdx;
 }
 
 #endif // !MQ_SPSC_H

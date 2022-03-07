@@ -6,7 +6,7 @@
 #include "pps_api_lua.h"
 #include "lpps_lua_seri.h"
 #include "pps_timer.h"
-#include "pps_net.h"
+#include "pps_net_api.h"
 #include "pps_api_lua_socket.h"
 #include "pps_worker.h"
 
@@ -87,7 +87,7 @@ static void on_net_msg(struct net_msg*m, void* adapter, struct pps_service* s, s
 					arg.ud = &tmp;
 					arg.cb = lpps_read_msg;
 					int trunc;
-					int retRead = net_tcp_read(s->pipes, ret->sockId.idx, ret->sockId.cnt, &arg, &trunc);
+					int retRead = netapi_tcp_read(s->pipes, ret->sockId.idx, ret->sockId.cnt, &arg, &trunc);
 					if(retRead > 0){  // has read sth
 						lua_pushinteger(L, ret->session);
 						lua_pushinteger(L, tmp.total);
@@ -120,8 +120,8 @@ static void on_net_msg(struct net_msg*m, void* adapter, struct pps_service* s, s
 					printf("lua recv tcpConnIn, protocol=%d\n", -1);  // debug
 					int32_t listenSockIdx = mIn->sockIdParent.idx;
 					uint32_t listenSockCnt = mIn->sockIdParent.cnt;
-					if (!net_is_listen_valid(lctx->svc->pipes, listenSockIdx, listenSockCnt)) { // listen sock has closed
-						net_close_sock(lctx->svc->pipes, mIn->sockId.idx, mIn->sockId.cnt);
+					if (!netapi_is_listen_valid(lctx->svc->pipes, listenSockIdx, listenSockCnt)) { // listen sock has closed
+						netapi_close_sock(lctx->svc->pipes, mIn->sockId.idx, mIn->sockId.cnt);
 						return;
 					}
 					//

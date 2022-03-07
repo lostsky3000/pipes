@@ -51,7 +51,6 @@ struct pps_service
 	struct mq_spsc<struct timer_msg>* mqTimer;
 	struct mq_mpsc<struct net_msg>* mqNet;
 	struct pps_worker* curWorker;
-	bool* mqVisible4Timer;
 	struct exclusive_svc_ctx* exclusiveCtx;
 	// user logic
 	struct pps_service_ud ud;
@@ -88,7 +87,7 @@ inline int svc_check_mqtimer_init(struct pps_service* s)
 {
 	if (s->mqTimer == nullptr) {
 		s->mqTimer = spsc_create<struct timer_msg>(SVC_MQTIMER_LEN);
-		spsc_read_thread_init(s->mqTimer);
+		spsc_read_thread_acquire(s->mqTimer);
 		SVC_RT_END(s);   // ensure mq visible
 		return 1;
 	}

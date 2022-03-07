@@ -11,20 +11,12 @@
 #include "pipes.h"
 #include "minheap.h"
 
+
 typedef int(*CB_SOCK_TCP_ACCEPT)(struct pps_net* net, struct socket_sockctx* sock, 
 	SOCK_FD fd, SOCK_ADDR* addrRemote, int portRemote);
 typedef int(*CB_SOCK_TCP_READ)(struct pps_net* net, struct socket_sockctx* sock);
 typedef int(*CB_SOCK_TCP_SEND)(struct pps_net* net, struct socket_sockctx* sock);
 typedef int(*CB_SOCK_TCP_CONN_WAIT)(struct pps_net* net, struct socket_sockctx* sock, int errCode);
-
-#define TASK_REQ_BUF_LEN 128
-struct net_task_req
-{
-	int16_t cmd;
-	uint16_t szBuf;
-	struct netreq_src src;
-	char buf[TASK_REQ_BUF_LEN];
-};
 
 
 #define NET_MSG_BUF_LEN 30
@@ -95,17 +87,24 @@ struct pps_net
 
 void net_thread(struct pps_net* net);
 
-//
-int net_tcp_listen(struct netreq_src* src, struct pipes* pipes, struct tcp_server_cfg* cfg);
-
-int net_get_remote(struct pipes* pipes, int idx, uint32_t cnt, char* buf, int szBuf, int* port);
-int net_close_sock(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt);
-int net_tcp_read(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt, struct read_arg* arg, int* trunc);
-int net_tcp_send(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt, const char* buf, int size);
-int net_is_listen_valid(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt);
-int net_tcp_connect(struct netreq_src* src, struct pipes* pipes, struct tcp_connect_cfg* cfg);
-
 void net_shutdown(struct pipes* pipes);
+
+
+inline void net_wrap_svc_msg(struct net_msg_ori* msg, struct netreq_src* src, int cmd, void*payload, int size)
+{
+	msg->to = *src;
+	msg->cmd = cmd;
+	msg->szBuf = size;
+	memcpy(msg->buf, payload, size);
+}
+int net_send_to_svc(struct net_msg_ori* msg, struct pps_net* net, bool addToWait);
+int net_send_to_svc_ext(struct net_msg_ori* msg, struct pipes* pipes);
+
+inline struct pps_net* net_alloc(struct pipes* pipes)
+{
+	uint32_t idxNet = pipes->netAllocCnt.fetch_add(1, std::memory_order_relaxed) % pipes->config->net_num;
+	return &pipes->nets[idxNet];
+}
 //
 inline struct pps_net* net_get(struct pipes* pipes, uint32_t idx)
 {

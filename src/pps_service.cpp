@@ -138,11 +138,8 @@ int32_t svc_send_timermsg(uint32_t idxTo, struct timer_msg* msg, struct pps_time
 	if (s->mqTimer == nullptr) {
 		SVC_RT_BEGIN(s);    // ensure mqTimer visible
 	}*/
-	if(!s->mqVisible4Timer[timer->index]){
-		spsc_write_thread_init(s->mqTimer);
-		s->mqVisible4Timer[timer->index] = true;
-	}
-	if (!spsc_push_ptr(s->mqTimer, msg)) { // mq is full, imposible
+	spsc_write_thread_acquire(s->mqTimer);  // optimize?
+	if (!spsc_push_ptr(s->mqTimer, msg)) { // mq is full, impossible
 		assert(false);  // debug
 		//return 0;
 	}
@@ -262,10 +259,7 @@ const struct pps_service_mgr* svcmgr_create(struct pipes* pipes)
 		svc.mqIn = nullptr;
 		svc.mqWaitSend = nullptr;
 		svc.mqTimer = nullptr;
-		svc.mqVisible4Timer = new bool[cfg->timer_num];
-		for(int j=0; j<cfg->timer_num; ++j){
-			svc.mqVisible4Timer[j] = false;
-		}
+		svc.timer = nullptr;
 		svc.mqNet = nullptr;
 		svc.waitSendMsgNum = 0;
 		svc.onTask.store(false);
