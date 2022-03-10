@@ -17,7 +17,7 @@
 //
 #define SOCK_SEND_BUF_MIN 1024
 #define SOCK_SEND_BUF_MAX 4096
-#define SOCK_RECV_BUF_MIN 4
+#define SOCK_RECV_BUF_MIN 1024
 #define SOCK_RECV_BUF_MAX 8192
 #define SOCK_BACKLOG_DEF 128
 #define SOCK_BACKLOG_MAX 8192
@@ -124,6 +124,7 @@ struct read_runtime
 	int preLockOwner;
 	uint32_t sockCnt;
 	int32_t waitReadable;
+	int readWaitDecType;
 	std::atomic<int32_t> readable;
 	std::atomic<uint32_t> fillBufIdx;
 	uint32_t fillBufIdx4Net;
@@ -459,10 +460,12 @@ typedef int(*FN_READDEC_INIT)(struct read_runtime* run, struct read_arg* arg);
 int sockdec_init_now(struct read_runtime* run, struct read_arg* arg);
 int sockdec_init_len(struct read_runtime* run, struct read_arg* arg);
 int sockdec_init_sep(struct read_runtime* run, struct read_arg* arg);
-typedef int(*FN_READDEC_READ)(struct read_runtime* run, int* notifyReadable, int* trunc);
-int sockdec_read_sep(struct read_runtime* run, int* waitReadable, int* trunc);
-int sockdec_read_len(struct read_runtime* run, int* waitReadable, int* trunc);
-int sockdec_read_now(struct read_runtime* run, int* waitReadable, int* trunc);
+typedef int(*FN_READDEC_READ)(struct read_runtime* run, int* notifyReadable, int*readableUsed, int* trunc);
+int sockdec_read_sep(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc);
+int sockdec_read_len(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc);
+int sockdec_read_now(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc);
+
+bool sockdec_sep_seek(struct read_decode_sep* d, int readableBytes);
 
 #endif // !PPS_SOCKET_H
 

@@ -153,15 +153,17 @@ static int read_now_inner(struct read_runtime* run, int readableOri, int* waitRe
 	run->readable.fetch_sub(writeCnt, std::memory_order_release);
 	return 1;
 }
-int sockdec_read_now(struct read_runtime* run, int* waitReadable, int* trunc)
+int sockdec_read_now(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc)
 {
 	int readableOri = run->readable.load(std::memory_order_acquire);
+	*readableUsed = readableOri;
 	return read_now_inner(run, readableOri, waitReadable, trunc);
 }
-int sockdec_read_len(struct read_runtime* run, int* waitReadable, int* trunc)
+int sockdec_read_len(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc)
 {
 	struct read_decode_len* d = (struct read_decode_len*)run->curDec;
 	int readableOri = run->readable.load(std::memory_order_acquire);
+	*readableUsed = readableOri;
 	if (readableOri < d->readLen) {  // no readable data
 		*waitReadable = d->readLen;
 		return 0;
@@ -195,37 +197,47 @@ int sockdec_read_len(struct read_runtime* run, int* waitReadable, int* trunc)
 	run->readable.fetch_sub(writeCnt, std::memory_order_release);
 	return 1;
 }
+
+bool sockdec_sep_seek(struct read_decode_sep* d, int readableBytes)
+{
+	int& sepCharSeek = d->sepCharSeek;
+	int& sepLen = d->sepLen;
+	if(sepCharSeek == sepLen){  // already match
+		return true;
+	}
+	int& seekedBytes = d->seekedBytes;
+	int canSeekBytes = readableBytes - seekedBytes;
+	if (canSeekBytes < sepLen - sepCharSeek) {
+		return false;
+	}
+	int& seekBufPos = d->seekBufPos;
+	char* sep = d->sep;
+	struct read_buf_block* buf = d->seekBuf;
+	while (--canSeekBytes >= 0) {
+		if (seekBufPos >= buf->cap) {  // seek next buf
+			buf = buf->next;
+			d->seekBuf = buf;
+			seekBufPos = 0;
+		}
+		char ch1 = buf->buf[seekBufPos++];
+		char ch2 = sep[sepCharSeek];
+		if (ch1 == ch2) {
+			++sepCharSeek;
+		} else {
+			sepCharSeek = 0;
+		}
+		++seekedBytes;
+		if (sepCharSeek == sepLen) {   // match found
+			return true;
+		}
+	}
+	return false;
+}
 static int read_sep_inner(struct read_runtime* run, int* waitReadable, int readableOri)
 {
 	struct read_decode_sep* d = (struct read_decode_sep*)run->curDec;
-	int unseekBytes = readableOri - d->seekedBytes;
-	if (unseekBytes < d->sepLen - d->sepCharSeek) {
-		*waitReadable = readableOri + d->sepLen - d->sepCharSeek;
-		return 0;
-	}
 	//seek
-	bool found = false;
-	struct read_buf_block* buf = d->seekBuf;
-	while (--unseekBytes >= 0) {
-		if (d->seekBufPos >= buf->cap) {  // seek next buf
-			buf = buf->next;
-			d->seekBuf = buf;
-			d->seekBufPos = 0;
-		}
-		char ch1 = buf->buf[d->seekBufPos++];
-		char ch2 = d->sep[d->sepCharSeek];
-		if (ch1 == ch2) {
-			++d->sepCharSeek;
-		} else {
-			d->sepCharSeek = 0;
-		}
-		++d->seekedBytes;
-		if (d->sepCharSeek == d->sepLen) {   // match found
-			found = true;
-			break;
-		}
-	}
-	if (!found) {  // match not found
+	if (!sockdec_sep_seek(d, readableOri)) {  // match not found
 		*waitReadable = readableOri + d->sepLen - d->sepCharSeek;
 		return 0;
 	}
@@ -234,7 +246,7 @@ static int read_sep_inner(struct read_runtime* run, int* waitReadable, int reada
 	}
 	// consume data
 	readableOri = d->seekedBytes - d->sepLen;
-	buf = run->curReadBuf;
+	struct read_buf_block* buf = run->curReadBuf;
 	int readable = readableOri;
 	if (readable > 0) {
 		int writeCnt = 0;
@@ -259,7 +271,7 @@ static int read_sep_inner(struct read_runtime* run, int* waitReadable, int reada
 				readable -= bufLeft;
 			}
 		}
-	} else {
+	} else {    // empty string
 		run->cbRead(0, 0, nullptr, 0, run->udRead);
 	}
 	// consume sep
@@ -287,9 +299,10 @@ static int read_sep_inner(struct read_runtime* run, int* waitReadable, int reada
 	//d->seekedBytes = 0;
 	return 1;
 }
-int sockdec_read_sep(struct read_runtime* run, int* waitReadable, int* trunc)
+int sockdec_read_sep(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc)
 {
 	int readableOri = run->readable.load(std::memory_order_acquire);
+	*readableUsed = readableOri;
 	if (read_sep_inner(run, waitReadable, readableOri)) { // read succ & no trunc
 		*trunc = 0;   // no trunc
 		return 1;

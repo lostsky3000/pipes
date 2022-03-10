@@ -92,6 +92,8 @@ struct tcp_read_wait
 {
 	int32_t waitReadable;
 	struct netmsg_src sockId;
+	int decType;
+	int readableUsed;
 };
 struct netreq_read_wait
 {

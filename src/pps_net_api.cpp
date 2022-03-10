@@ -120,9 +120,9 @@ int netapi_tcp_read(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt, stru
 		run->readPackMax = arg->maxRead;
 	}
 	run->udRead = arg->ud;
-
 	int waitReadable = -1;
-	int ret = s_arrDecRead[decType](run, &waitReadable, trunc);
+	int readableUsed = 0;
+	int ret = s_arrDecRead[decType](run, &waitReadable, &readableUsed, trunc);
 	if (ret) {   // read done
 		run->onReadWait = false;
 	} else {   // readWait
@@ -136,10 +136,10 @@ int netapi_tcp_read(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt, stru
 			}
 			*/
 			if (decType != DECTYPE_NOW) {   // read all left
-				ret = s_arrDecRead[DECTYPE_NOW](run, &waitReadable, trunc);
+				ret = s_arrDecRead[DECTYPE_NOW](run, &waitReadable, &readableUsed, trunc);
 			}
 			run->sockCnt = ctx->cnt4Net + 1;        // incr sockCnt to forbid follow read()
-													// tell net read() over
+			// tell net read() over
 			bool hasSendReadOver = run->hasSendReadOver;
 			run->hasSendReadOver = true;
 			sock_read_unlock(ctx);
@@ -156,6 +156,8 @@ int netapi_tcp_read(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt, stru
 			wait.waitReadable = waitReadable;
 			wait.sockId.idx = sockIdx;
 			wait.sockId.cnt = sockCnt;
+			wait.decType = decType;
+			wait.readableUsed = readableUsed;
 			struct netreq_read_wait req;
 			req.src.idx = arg->srcIdx;
 			req.src.cnt = arg->srcCnt;

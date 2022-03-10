@@ -96,6 +96,8 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 	struct read_runtime* run = &ctx->readRuntime;
 	struct read_buf_block* buf;
 	int32_t& waitReadable = run->waitReadable;
+	bool readWaitTrig = false;
+	bool hasReadWait = (waitReadable > 0);
 	if (!run->sockClosed) {
 		// recycle bufs that has read
 		uint32_t readBufIdx = run->readBufIdx.load(std::memory_order_acquire);
@@ -117,8 +119,22 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 			if (read > 0) {   // read some
 				buf->size4Fill += read;
 				readable = run->readable.fetch_add(read, std::memory_order_release) + read;
+				// check readWait task
+				if(hasReadWait && !readWaitTrig){  // has readwait task && not trig yet, check read wait trig
+					if (run->readWaitDecType == DECTYPE_SEP) {
+						struct read_decode_sep* dec = (struct read_decode_sep*)run->curDec;
+						if (sockdec_sep_seek(dec, readable)) {
+							readWaitTrig = true;
+						}
+						sock_read_atom_release(ctx);
+					}else{
+						if (readable >= waitReadable) {
+							readWaitTrig = true;
+						}
+					}
+				}
 				// check recvbuf is full
-				if(readable >= ctx->recvBufLen && (waitReadable < 1|| readable >= waitReadable)){   // recvBuf full, pause pollIn
+				if(readable >= ctx->recvBufLen && (!hasReadWait || readWaitTrig)){   // recvBuf full, check pause pollIn
 					ctx->pollInReg = false;
 					poll_evt_mod(net->pollFd, sock);
 					printf("on_tcp_read(), readBuf is full, remove pollIn\n");         // debug
@@ -149,8 +165,9 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 			}
 		}
 	}
-	if (waitReadable > 0) {   // there is a readWait, notify
-		if(run->sockClosed || run->readable.load(std::memory_order_relaxed) >= waitReadable) {
+	if (hasReadWait) {   // there is a readWait, check notify
+		//if(run->sockClosed || run->readable.load(std::memory_order_relaxed) >= waitReadable) {
+		if (readWaitTrig || run->sockClosed) {
 			// notify svc
 			waitReadable = -1;
 			struct tcp_read_wait_ret ret;
@@ -457,6 +474,7 @@ static bool do_tcp_add(struct netreq_src* src, struct pps_net* net, struct tcp_a
 	int32_t n = b->size4Fill;
 	n = b->cap;
 	n = run->waitReadable;
+	int nDef = run->readWaitDecType;
 	uint32_t un = run->fillBufIdx4Net;
 	struct read_buf_queue* q = &run->queReading;
 	q = &run->queFree;
@@ -556,10 +574,21 @@ static bool do_read_wait(struct netreq_src* src, struct tcp_read_wait* req, stru
 	struct socket_ctx* ctx = sock_get_ctx(net->sockMgr, req->sockId.idx);
 	struct read_runtime* run = &ctx->readRuntime;
 	assert(run->waitReadable == -1);   // debug
-	if (req->waitReadable <= run->readable.load(std::memory_order_relaxed) 
-			|| run->sockClosed
-			|| ctx->closeCalled4Net) {
-		//
+	//
+	int readable = run->readable.load(std::memory_order_relaxed);
+	int decType = req->decType;
+	bool readWaitTrig = false;
+	if(readable > req->readableUsed){   // read new data after svc send readWait, check
+		if (decType == DECTYPE_SEP) {
+			sock_read_atom_acquire(ctx);
+			struct read_decode_sep* dec = (struct read_decode_sep*)run->curDec;
+			readWaitTrig = sockdec_sep_seek(dec, readable);
+			sock_read_atom_release(ctx);
+		} else {
+			readWaitTrig = (req->waitReadable <= readable);
+		}
+	}
+	if (readWaitTrig || run->sockClosed || ctx->closeCalled4Net) {
 		struct tcp_read_wait_ret ret;
 		ret.session = src->session;
 		ret.sockId.idx = req->sockId.idx;
@@ -567,6 +596,7 @@ static bool do_read_wait(struct netreq_src* src, struct tcp_read_wait* req, stru
 		send_readnotify_to_svc(net, src, &ret);
 		return true;
 	}
+	run->readWaitDecType = decType;
 	run->waitReadable = req->waitReadable;
 	ctx->src = *src;
 	if (!ctx->pollInReg) {   // enable pollIn
@@ -643,7 +673,6 @@ static bool do_tcp_close(struct netreq_src* src, struct pps_net* net)
 	ctx->closeCalled4Net = true;
 	if (ctx->type == SOCKCTX_TYPE_TCP_CHANNEL) {
 		struct read_runtime* rrun = &ctx->readRuntime;
-		//struct send_runtime* srun = &ctx->sendRuntime;
 		if (ctx->readOver4Net) {  // has recv read-over, do nothing
 			return false;
 		}
@@ -656,15 +685,16 @@ static bool do_tcp_close(struct netreq_src* src, struct pps_net* net)
 			return false;
 		}
 		// close fd
-		SOCK_FD* pFd = &ctx->socks[0].fd;
+		//SOCK_FD* pFd = &ctx->socks[0].fd;
 		rrun->sockClosed = true;
 		sock_read_atom_release(ctx);        // make sockClosed visible for svc read
 		ctx->pollInReg = false;
 		ctx->pollOutReg = false;
-		sock_poll_del_fd(net->pollFd, &ctx->socks[0]);         // remove events reg
 		ctx->sendRuntime.sockClosed = true;
-		sock_fd_close(pFd);
-		del_net_fd(net, pFd);
+		//sock_poll_del_fd(net->pollFd, &ctx->socks[0]);         // remove events reg
+		//sock_fd_close(pFd);
+		//del_net_fd(net, pFd);
+		close_ctx_fd(net, ctx);
 		if (rrun->waitReadable > 0) {   // there is a readWait, notify src
 			rrun->waitReadable = -1;
 			struct tcp_read_wait_ret ret;
@@ -752,6 +782,7 @@ static void read_runtime_init(struct socket_ctx* ctx, int recvBufLen, uint32_t s
 	run->sockCnt = sockCnt;
 	run->sockClosed = false;
 	run->hasSendReadOver = false;
+	run->readWaitDecType = -1;
 	sock_read_unlock(ctx);
 }
 
@@ -1002,15 +1033,12 @@ static inline void enreq_tcp_add(struct net_task_req* t, struct netreq_tcp_add* 
 	t->szBuf = sz;
 	memcpy(t->buf, req->info, sz);
 }
-
 template<typename T>
 static void check_range(T& v, T min, T max)
 {
 	if (v < min) { v = min;}
 	if (v > max) { v = max;}
 }
-
-
 static void enreq_net_shutdown(struct net_task_req* t, struct netreq_tcp_shutdown* req)
 {
 	t->cmd = NETCMD_SHUTDOWN;
@@ -1090,7 +1118,6 @@ int net_init_main_thread(struct pps_net* net, struct pipes* pipes, struct socket
 	net->pSetFd = new std::unordered_set<SOCK_FD>();
 	return 1;
 }
-
 void net_deinit_main_thread(struct pps_net* net)
 {
 	sock_eventfd_destroy(net->eventFd);

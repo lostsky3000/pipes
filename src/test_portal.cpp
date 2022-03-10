@@ -1258,10 +1258,45 @@ static void spsc_test()
 
 // spsc test end
 
+#include "tcp_decode.h"
+#include "dec_http_head.h"
 void test_portal_start()
 {
 	int n = 1;
-	
+	struct dec_sep* dec = decsep_new();
+	const char* sep = "\n\r";
+	decsep_reset(dec, sep, strlen(sep));
+	const char* testStr1 = "123456789";
+	const char* testStr2 = "12345\n\r67";
+	int readBytes;
+	n = decsep_check(dec, testStr1, strlen(testStr1), readBytes);
+	n = decsep_check(dec, testStr2, strlen(testStr2), readBytes);
+	n = 1;
+
+	//
+	const char* strReqLine = "GET /12345 HTTP/1.1\r\n";
+	const char* strHead1 = "host:test\r\n";
+	const char* strHead2 = "name:hehe\r\n";
+	const char* strHead3 = "age:123\r\n\r\n";
+	struct dec_http_head* decHttp = dechh_new();
+	n = dechh_tick(decHttp, strReqLine, strlen(strReqLine), readBytes);
+	n = dechh_tick(decHttp, strHead1, strlen(strHead1), readBytes);
+	n = dechh_tick(decHttp, strHead2, strlen(strHead2), readBytes);
+	n = dechh_tick(decHttp, strHead3, strlen(strHead3), readBytes);
+
+	const char* method = dechh_method(decHttp, &n);
+	const char* url = dechh_url(decHttp, &n);
+	const char* ver = dechh_ver(decHttp, &n);
+
+	char* pVal;
+	int keyLen, valLen;
+	dechh_headerit_init(decHttp);
+	const char* key1 = dechh_headerit_next(decHttp, &keyLen, &pVal, &valLen);
+	const char* key2 = dechh_headerit_next(decHttp, &keyLen, &pVal, &valLen);
+	const char* key3 = dechh_headerit_next(decHttp, &keyLen, &pVal, &valLen);
+	const char* key4 = dechh_headerit_next(decHttp, &keyLen, &pVal, &valLen);
+	n = 1;
+
 	//spsc_test();
 	//std::thread th = std::thread(test_thread);	
 	//th.join();

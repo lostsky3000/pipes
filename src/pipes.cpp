@@ -180,7 +180,7 @@ static int
 l_run(lua_State* L) 
 {	
 	// test 
-	//test_portal_start();
+	test_portal_start();
 	//
 	struct pipes* pipes = get_pipes(L);
 	if (pipes == NULL) {
