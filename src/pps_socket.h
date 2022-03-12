@@ -11,6 +11,7 @@
 #include "pool_linked.h"
 #include "pps_malloc.h"
 #include "pps_socket_plat.h"
+#include "tcp_decode.h"
 
 
 #define SOCK_ADDR_STRLEN 16
@@ -121,6 +122,7 @@ struct read_runtime
 	bool sockClosed;
 	bool hasSendReadOver;
 	std::atomic<int8_t> readLock;
+	int hasProtocol;
 	int preLockOwner;
 	uint32_t sockCnt;
 	int32_t waitReadable;
@@ -139,6 +141,8 @@ struct read_runtime
 	int32_t readPackMax;
 	CB_DEC_ON_READ cbRead;
 	void* udRead;
+	//
+	struct tcp_decode* tcpDec;
 };
 inline void rdbuf_clear(struct read_buf_queue* q)
 {
@@ -315,6 +319,9 @@ struct socket_ctx
 	int32_t idx;
 	std::atomic<uint32_t> cnt;
 	uint32_t cnt4Net;
+	//
+	int32_t parentIdx;
+	uint32_t parentCnt;
 	//
 	struct netreq_src src;
 	//

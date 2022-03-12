@@ -17,6 +17,8 @@ struct tcp_decode* decode_new(struct protocol_cfg* cfg)
 		struct tcp_decode_websocket* dec = decws_new((struct protocol_cfg_websocket*)cfg);
 		d = (struct tcp_decode*)dec;
 		d->cbConnCheck = decws_conn_check;
+		d->cbConnRsp = decws_conn_rsp;
+		d->cbPackCheck = decws_pack_check;
 	}
 	assert(d);
 	reset_decode(d, cfg);
@@ -31,6 +33,15 @@ void decode_reset(struct tcp_decode* d, struct protocol_cfg* cfg)
 	}
 	reset_decode(d, cfg);
 }
+int decode_destroy(struct tcp_decode* d)
+{
+	if(d->protocol == PPSTCP_PROTOCOL_WEBSOCKET){
+		decws_destroy((struct tcp_decode_websocket*)d);
+		return 1;
+	}
+	return 0;
+}
+
 
 //
 int decsep_check(struct dec_sep* d, const char* buf, int bufSize, int& readBytes)

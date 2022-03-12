@@ -15,6 +15,8 @@ struct protocol_cfg
 struct protocol_cfg_websocket
 {
 	struct protocol_cfg head;
+	int uriLen;
+	int uriCap;
 	char* uri;
 };
 
@@ -33,6 +35,8 @@ inline struct protocol_cfg* protocol_cfg_alloc(int type)
 		struct protocol_cfg_websocket* cfg = new struct protocol_cfg_websocket;
 		cfg->head.type = PPSTCP_PROTOCOL_WEBSOCKET;
 		cfg->uri = nullptr;
+		cfg->uriCap = 0;
+		cfg->uriLen = 0;
 		return (struct protocol_cfg*)cfg;
 	}
 	return nullptr;
@@ -44,10 +48,17 @@ inline struct protocol_cfg* protocol_cfg_clone(struct protocol_cfg* icfg)
 		struct protocol_cfg_websocket* cfgNew = new struct protocol_cfg_websocket;
 		cfgNew->head.type = PPSTCP_PROTOCOL_WEBSOCKET;
 		if(cfgOld->uri){
-			cfgNew->uri = (char*)pps_malloc(strlen(cfgOld->uri) + 1);
-			strcpy(cfgNew->uri, cfgOld->uri);
+			int uriLen = cfgOld->uriLen;
+			int uriCap = cfgOld->uriCap;
+			cfgNew->uri = new char[uriCap];
+			memcpy(cfgNew->uri, cfgOld->uri, uriLen);
+			cfgNew->uri[uriLen] = '\0';
+			cfgNew->uriLen = uriLen;
+			cfgNew->uriCap = uriCap;
 		}else{
 			cfgNew->uri = nullptr;
+			cfgNew->uriLen = 0;
+			cfgNew->uriCap = 0;
 		}
 		return (struct protocol_cfg*)cfgNew;
 	}
@@ -58,8 +69,10 @@ inline void protocol_cfg_free(struct protocol_cfg* icfg)
 	if(icfg->type == PPSTCP_PROTOCOL_WEBSOCKET){
 		struct protocol_cfg_websocket* cfg = (struct protocol_cfg_websocket*)icfg;
 		if(cfg->uri){
-			pps_free(cfg->uri);
+			delete[] cfg->uri;
 			cfg->uri = nullptr;
+			cfg->uriLen = 0;
+			cfg->uriCap = 0;
 		}
 		delete cfg;
 	}
@@ -70,11 +83,18 @@ inline int protocol_cfg_add_item_str(struct protocol_cfg* icfg, const char* key,
 	if(icfg->type == PPSTCP_PROTOCOL_WEBSOCKET){
 		struct protocol_cfg_websocket* cfg = (struct protocol_cfg_websocket*)icfg;
 		if(strcmp(key, "uri") == 0){
-			if(cfg->uri){
-				pps_free(cfg->uri);	
+			int strLen = strlen(val);
+			if(cfg->uri && cfg->uriCap <= strLen){
+				delete[] cfg->uri;
+				cfg->uri = nullptr;
 			}
-			cfg->uri = (char*)pps_malloc(strlen(val) + 1);
-			strcpy(cfg->uri, val);
+			if(cfg->uri == nullptr){
+				cfg->uriCap = strLen + 1;
+				cfg->uri = new char[cfg->uriCap];
+			}
+			memcpy(cfg->uri, val, strLen);
+			cfg->uri[strLen] = '\0';
+			cfg->uriLen = strLen;
 			return 1;
 		}else if(strcmp(key, "type") == 0){
 		

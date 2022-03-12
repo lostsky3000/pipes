@@ -333,6 +333,8 @@ void sockmgr_init_main_thread(struct socket_mgr* mgr, struct pipes* pipes)
 		ctx->sockCap = 0;
 		ctx->sockNum = 0;
 		sock_ctxsocks_init(ctx, 0);
+		ctx->parentIdx = -1;
+		ctx->parentCnt = 0;
 		// ctx init stuff
 		ctx->idx = i;
 		ctx->cnt.store(0);
@@ -347,6 +349,7 @@ void sockmgr_init_main_thread(struct socket_mgr* mgr, struct pipes* pipes)
 		for (int i = 0; i < TCP_DEC_NUM; ++i) {
 			run->arrDecode[i] = nullptr;
 		}
+		run->tcpDec = nullptr;
 		sock_read_atom_release(ctx);
 		//
 		struct send_runtime* srun = &ctx->sendRuntime;

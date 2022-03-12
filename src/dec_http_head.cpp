@@ -1,7 +1,7 @@
 #include "dec_http_head.h"
 
-static const char* DECHH_METHOD[2] = { "POST", "GET" };
-static const int DECHH_METHOD_LEN[2] = {4, 3};
+static const char* DECHH_METHOD[2] = { "GET", "POST" };
+static const int DECHH_METHOD_LEN[2] = {3, 4};
 
 
 static const char* DECHH_VER_LINE = "HTTP/1.1\r\n";
@@ -19,7 +19,7 @@ static inline bool url_ch_valid(char ch)
 }
 static inline bool header_ch_valid(char ch)
 {
-	return ch >= 33 && ch <= 126;
+	return ch >= 32 && ch <= 126;
 }
 
 static inline void expand_buf(struct dec_http_head*d)
@@ -175,12 +175,16 @@ int dechh_tick(struct dec_http_head*d, const char* buf, int bufSize, int& readBy
 						readBytes += seek;
 						return on_error(d, DECHH_ERR_HEADER_INVALID);
 					}
-					if (fieldLenCnt == 0) {  // 1st ch of val
-						d->tmpPos = idxWrite;
-						idxWrite += 2;     // 2bytes for vallen
+					if(fieldLenCnt != 0 || ch != ' '){  
+						if (fieldLenCnt == 0) {  // 1st valid ch of val
+							d->tmpPos = idxWrite;
+							idxWrite += 2;     // 2bytes for vallen
+						}
+						d->buf[idxWrite++] = ch;
+						++fieldLenCnt;
+					}else{  // skip leadingspace
+						
 					}
-					d->buf[idxWrite++] = ch;
-					++fieldLenCnt;
 				}else{  
 					if (fieldLenCnt == 0) {  // val is empty
 						readBytes += seek;

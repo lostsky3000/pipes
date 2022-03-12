@@ -1260,8 +1260,10 @@ static void spsc_test()
 
 #include "tcp_decode.h"
 #include "dec_http_head.h"
+#include "util_crypt.h"
 void test_portal_start()
 {
+	return;
 	int n = 1;
 	struct dec_sep* dec = decsep_new();
 	const char* sep = "\n\r";
@@ -1272,7 +1274,23 @@ void test_portal_start()
 	n = decsep_check(dec, testStr1, strlen(testStr1), readBytes);
 	n = decsep_check(dec, testStr2, strlen(testStr2), readBytes);
 	n = 1;
+	// ws sec test
+	const char* strWsSec = "5psC1FKyvTLZ1i+t3eaw+g==";
+	const char* WSSECKEY = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+	int szWsSec = strlen(strWsSec);
+	int szSecKey = strlen(WSSECKEY);
+	int szBufEnc = szWsSec + szSecKey;
+	char* encBuf = new char[szBufEnc];
+	memcpy(encBuf, strWsSec, szWsSec);
+	memcpy(encBuf + szWsSec, WSSECKEY, szSecKey);
 
+	uint8_t digest[SHA1_DIGEST_SIZE];
+	ucrypt_sha1((uint8_t*)encBuf, szBufEnc, digest);
+	n = ucrypt_b64encode_calcsz(SHA1_DIGEST_SIZE);
+	char bufTmp[1024];
+	ucrypt_b64encode(digest, SHA1_DIGEST_SIZE, bufTmp);
+	bufTmp[n] = '\0';
+	delete[] encBuf;
 	//
 	const char* strReqLine = "GET /12345 HTTP/1.1\r\n";
 	const char* strHead1 = "host:test\r\n";

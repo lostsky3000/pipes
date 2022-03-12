@@ -90,14 +90,44 @@ static struct read_buf_block* expand_fill_buf(struct read_runtime* run, int recv
 	run->fillBufIdx.store(run->fillBufIdx4Net, std::memory_order_release);
 	return buf;
 }
+static int read_protocol_conn(struct read_runtime* run, int readableOri, struct tcp_decode* dec);
+static int read_protocol_pack(struct read_runtime* run, int readableOri, struct tcp_decode* dec);
+static int conn_rsp(void* ud, const char* buf, int sz)
+{
+	SOCK_FD* pFd = (SOCK_FD*)ud;
+	int ret = sock_tcp_send(*pFd, buf, sz);
+	if(ret >= sz){   // all send done
+		return 1;
+	}
+	if(ret == SEND_RET_CLOSE){  // conn closed
+		return 0;
+	}
+	// sendBuf is full, rarely
+	int hasSend = 0;
+	if(ret != SEND_RET_AGAIN){   // has send some
+		sz -= ret;
+		hasSend += ret;
+	}
+	while(sz > 0){  // loop send
+		ret = sock_tcp_send(*pFd, buf + hasSend, sz);
+		if (ret == SEND_RET_CLOSE) {  // conn closed
+			return 0;
+		}
+		if(ret != SEND_RET_AGAIN){
+			sz -= ret;
+			hasSend += ret;
+		}
+	}
+	return 1;
+}
+static inline bool notify_svc_conn_in(struct pps_net* net, struct socket_ctx* ctx);
 static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 {
 	struct socket_ctx* ctx = sock->main; 
 	struct read_runtime* run = &ctx->readRuntime;
 	struct read_buf_block* buf;
-	int32_t& waitReadable = run->waitReadable;
-	bool readWaitTrig = false;
-	bool hasReadWait = (waitReadable > 0);
+	int readable = 0;
+	// 
 	if (!run->sockClosed) {
 		// recycle bufs that has read
 		uint32_t readBufIdx = run->readBufIdx.load(std::memory_order_acquire);
@@ -108,38 +138,17 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 			buf = rdbuf_pop(&run->queReading);
 			rdbuf_push(&run->queFree, buf);
 		}
-		//
+		// do fill
 		buf = run->curFillBuf;
 		if (buf->size4Fill >= buf->cap) {   // curFillBuf is full, prepare newBuf for fill
 			buf = expand_fill_buf(run, ctx->recvBufLen);
 		}
-		int read,readable;
+		int read;
 		while (true) {
 			read = sock_tcp_read(sock->fd, buf->buf + buf->size4Fill, buf->cap - buf->size4Fill);
 			if (read > 0) {   // read some
 				buf->size4Fill += read;
 				readable = run->readable.fetch_add(read, std::memory_order_release) + read;
-				// check readWait task
-				if(hasReadWait && !readWaitTrig){  // has readwait task && not trig yet, check read wait trig
-					if (run->readWaitDecType == DECTYPE_SEP) {
-						struct read_decode_sep* dec = (struct read_decode_sep*)run->curDec;
-						if (sockdec_sep_seek(dec, readable)) {
-							readWaitTrig = true;
-						}
-						sock_read_atom_release(ctx);
-					}else{
-						if (readable >= waitReadable) {
-							readWaitTrig = true;
-						}
-					}
-				}
-				// check recvbuf is full
-				if(readable >= ctx->recvBufLen && (!hasReadWait || readWaitTrig)){   // recvBuf full, check pause pollIn
-					ctx->pollInReg = false;
-					poll_evt_mod(net->pollFd, sock);
-					printf("on_tcp_read(), readBuf is full, remove pollIn\n");         // debug
-					break;
-				}
 				if (buf->size4Fill >= buf->cap) {  // cur buf is full, expand
 					buf = expand_fill_buf(run, ctx->recvBufLen);
 				}
@@ -165,7 +174,76 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 			}
 		}
 	}
+	if (readable == 0) {
+		readable = run->readable.load(std::memory_order_relaxed);
+	}
+	int32_t& waitReadable = run->waitReadable;
+	bool hasReadWait = (waitReadable > 0);
+	bool rdSockClosed = run->sockClosed;
+	if(!rdSockClosed){
+		// check protocol conn done
+		if(run->hasProtocol){
+			struct tcp_decode* decTcp = run->tcpDec;
+			if(!decTcp->connDone){  // conn not done, just read for checking conn
+				//sock_read_atom_acquire(ctx);
+				int connRet = read_protocol_conn(run, readable, decTcp);
+				sock_read_atom_release(ctx);
+				if(connRet > -1){  // connDone, rsp to client
+					int rspRet = decTcp->cbConnRsp(decTcp, &sock->fd, conn_rsp);
+					if(connRet > 0 || !rspRet || !notify_svc_conn_in(net, ctx)){  
+						// conn check failed || send rsp failed || notify svc failed(svc gone),  close & recycle
+						close_ctx_fd(net, ctx);
+						recycle_ctx(net, ctx);
+					}
+				}
+				return 1;
+			}
+			int packRet = read_protocol_pack(run, readable, decTcp);
+			int n = 1;
+		}
+	}else{
+	
+	}
+	if(readable >= ctx->recvBufLen && !rdSockClosed){   // recvBuf is full, check pause read
+		bool pauseRead = true;
+		if(run->hasProtocol){  // check conndone
+		
+		}
+		if(pauseRead){
+			ctx->pollInReg = false;
+			poll_evt_mod(net->pollFd, sock);
+			printf("on_tcp_read(), readBuf is full, remove pollIn\n");         // debug
+		}
+	}
+	
+	/*
+	// check readWait task
+	if(hasReadWait && !readWaitTrig){  // has readwait task && not trig yet, check read wait trig
+	if (run->readWaitDecType == DECTYPE_SEP) {
+	struct read_decode_sep* dec = (struct read_decode_sep*)run->curDec;
+	if (sockdec_sep_seek(dec, readable)) {
+	readWaitTrig = true;
+	}
+	sock_read_atom_release(ctx);
+	}else{
+	if (readable >= waitReadable) {
+	readWaitTrig = true;
+	}
+	}
+	}
+	// check recvbuf is full
+	if(readable >= ctx->recvBufLen && (!hasReadWait || readWaitTrig)){   // recvBuf full, check pause pollIn
+	ctx->pollInReg = false;
+	poll_evt_mod(net->pollFd, sock);
+	printf("on_tcp_read(), readBuf is full, remove pollIn\n");         // debug
+	break;
+	}
+	*/
 	if (hasReadWait) {   // there is a readWait, check notify
+		bool readWaitTrig = false;
+		if(readable == 0){
+			readable = run->readable.load(std::memory_order_relaxed);
+		}
 		//if(run->sockClosed || run->readable.load(std::memory_order_relaxed) >= waitReadable) {
 		if (readWaitTrig || run->sockClosed) {
 			// notify svc
@@ -179,6 +257,76 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 	}
 	return 1;
 }
+
+static int read_protocol_conn(struct read_runtime* run, int readableOri, struct tcp_decode* dec)
+{
+	struct read_buf_block* buf = run->curReadBuf;
+	int readable = readableOri;
+	int bytesHasRead = 0;
+	int ret = -1;
+	int bufLeft = 0;
+	int hasReadTotal = 0;
+	while (readable > 0) {
+		bufLeft = buf->cap - buf->size4Read;
+		if (bufLeft < 1) {  // curReadBuf read done, change to next buf
+			buf = buf->next;
+			run->curReadBuf = buf;
+			buf->size4Read = 0;
+			bufLeft = buf->cap;
+			run->readBufIdx.fetch_add(1, std::memory_order_release);
+		}
+		if (readable < bufLeft) {
+			ret = dec->cbConnCheck(dec, buf->buf + buf->size4Read, readable, bytesHasRead);
+		} else {
+			ret = dec->cbConnCheck(dec, buf->buf + buf->size4Read, bufLeft, bytesHasRead);
+		}
+		buf->size4Read += bytesHasRead;
+		readable -= bytesHasRead;
+		hasReadTotal += bytesHasRead;
+		if(ret > -1){   // conn done
+			run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
+			return ret;
+		}
+	}
+	run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
+	return -1;
+}
+static int read_protocol_pack(struct read_runtime* run, int readableOri, struct tcp_decode* dec)
+{
+	struct read_buf_block* buf = run->curReadBuf;
+	int readable = readableOri;
+	int bytesHasRead = 0;
+	int ret = -1;
+	int bufLeft = 0;
+	int hasReadTotal = 0;
+	while (readable > 0) {
+		bufLeft = buf->cap - buf->size4Read;
+		if (bufLeft < 1) {  // curReadBuf read done, change to next buf
+			buf = buf->next;
+			run->curReadBuf = buf;
+			buf->size4Read = 0;
+			bufLeft = buf->cap;
+			run->readBufIdx.fetch_add(1, std::memory_order_release);
+		}
+		if (readable < bufLeft) {
+			//ret = dec->cbConnCheck(dec, buf->buf + buf->size4Read, readable, bytesHasRead);
+			ret = dec->cbPackCheck(dec, (uint8_t*)buf->buf + buf->size4Read, readable, bytesHasRead);
+		} else {
+			//ret = dec->cbConnCheck(dec, buf->buf + buf->size4Read, bufLeft, bytesHasRead);
+			ret = dec->cbPackCheck(dec, (uint8_t*)buf->buf + buf->size4Read, bufLeft, bytesHasRead);
+		}
+		buf->size4Read += bytesHasRead;
+		readable -= bytesHasRead;
+		hasReadTotal += bytesHasRead;
+		if (ret > -1) {   // conn done
+			run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
+			return ret;
+		}
+	}
+	run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
+	return -1;
+}
+
 static int on_tcp_send(struct pps_net* net, struct socket_sockctx* sock)
 {
 	struct socket_ctx* ctx = sock->main; 
@@ -453,6 +601,19 @@ void net_thread(struct pps_net* net)
 	printf("net(%d) end\n", net->index);  // debug
 }
 
+static inline bool notify_svc_conn_in(struct pps_net* net, struct socket_ctx* ctx)
+{
+	struct tcp_conn_in m;
+	m.sockId.idx = ctx->idx;
+	m.sockId.cnt = ctx->cnt4Net;
+	m.sockIdParent.idx = ctx->parentIdx;
+	m.sockIdParent.cnt = ctx->parentCnt;
+	net_wrap_svc_msg(net->pNetMsgOri, &ctx->src, NETCMD_TCP_CONNIN, &m, sizeof(m));
+	if (net_send_to_svc(net->pNetMsgOri, net, true) < 0) {   // dst svc has gone
+		return false;
+	}
+	return true;
+}
 static bool do_tcp_add(struct netreq_src* src, struct pps_net* net, struct tcp_add_info* info)
 {
 	struct socket_ctx* ctx = sock_get_ctx(net->sockMgr, src->idx);
@@ -485,19 +646,30 @@ static bool do_tcp_add(struct netreq_src* src, struct pps_net* net, struct tcp_a
 	bo = srun->sockClosed;
 	struct send_buf_block* sbuf = srun->curSendBuf;
 	sbuf->size4Send = 0;
-	// notify src
-	struct tcp_conn_in m;
-	m.sockId.idx = ctx->idx;
-	m.sockId.cnt = ctx->cnt4Net;
-	m.sockIdParent.idx = info->parentIdx;
-	m.sockIdParent.cnt = info->parentCnt;
-	net_wrap_svc_msg(net->pNetMsgOri, &info->src, NETCMD_TCP_CONNIN, &m, sizeof(m));
-	int sendRet = net_send_to_svc(net->pNetMsgOri, net, true);
-	if (sendRet < 0) {   // dst svc has gone
-		close_ctx_fd(net, ctx);
-		// recycle ctx
-		recycle_ctx(net, ctx);
-		return false;
+	//
+	bool connDone = true;
+	if(run->hasProtocol){  // has protocol
+		struct tcp_decode* dec = run->tcpDec;
+		int readBytes;
+		int connRet = dec->cbConnCheck(dec, nullptr, 0, readBytes);
+		if(connRet != 0){
+			connDone = false;
+			if(connRet > 0){   // conn error, close sock
+				close_ctx_fd(net, ctx);
+				recycle_ctx(net, ctx);  // recycle ctx
+			}
+		}
+	}
+	ctx->src = info->src;
+	ctx->parentIdx = info->parentIdx;
+	ctx->parentCnt = info->parentCnt;
+	if(connDone){
+		// notify src
+		if(!notify_svc_conn_in(net, ctx)){
+			close_ctx_fd(net, ctx);
+			recycle_ctx(net, ctx);
+			return false;
+		}
 	}
 	return true;
 }
@@ -753,7 +925,7 @@ static void send_runtime_init(struct socket_ctx* ctx, int sendBufLen, uint32_t s
 	run->sockClosed = false;
 	sock_send_unlock(ctx);
 }
-static void read_runtime_init(struct socket_ctx* ctx, int recvBufLen, uint32_t sockCnt) 
+static void read_runtime_init(struct socket_ctx* ctx, int recvBufLen, uint32_t sockCnt, struct protocol_cfg* protocolCfg)
 {
 	struct read_runtime* run = &ctx->readRuntime;
 	assert(sock_read_trylock(ctx));
@@ -783,11 +955,27 @@ static void read_runtime_init(struct socket_ctx* ctx, int recvBufLen, uint32_t s
 	run->sockClosed = false;
 	run->hasSendReadOver = false;
 	run->readWaitDecType = -1;
+	// init protocol decoder
+	if(protocolCfg){
+		run->hasProtocol = 1;
+		if(run->tcpDec && run->tcpDec->protocol != protocolCfg->type){  // protocol not match
+			decode_destroy(run->tcpDec);
+			run->tcpDec = nullptr;
+		}
+		if(run->tcpDec){
+			decode_reset(run->tcpDec, protocolCfg);
+		}else{
+			run->tcpDec = decode_new(protocolCfg);
+		}
+	}else{
+		run->hasProtocol = 0;
+	}
 	sock_read_unlock(ctx);
 }
 
 static void init_tcp_channel_ctx(struct pps_net* net, struct socket_ctx* ctx, 
-	int sendBuf, int recvBuf, SOCK_FD* pFd, SOCK_ADDR* pAddrRemote, int portRemote)
+	int sendBuf, int recvBuf, SOCK_FD* pFd, SOCK_ADDR* pAddrRemote, int portRemote,
+	struct protocol_cfg* protocolCfg=nullptr)
 {
 	ctx->idxNet = net->index;
 	ctx->type = SOCKCTX_TYPE_TCP_CHANNEL;
@@ -802,7 +990,7 @@ static void init_tcp_channel_ctx(struct pps_net* net, struct socket_ctx* ctx,
 	ctx->readOver4Net = false;
 	ctx->cnt4Net = ctx->cnt.load(std::memory_order_relaxed);
 	send_runtime_init(ctx, ctx->sendBufLen, ctx->cnt4Net);   // do not swap down(ensure closeCalled visible for read())
-	read_runtime_init(ctx, ctx->recvBufLen, ctx->cnt4Net);   // do not swap up(ensure closeCalled visible for read())
+	read_runtime_init(ctx, ctx->recvBufLen, ctx->cnt4Net, protocolCfg);   // do not swap up(ensure closeCalled visible for read())
 }
 static inline void enreq_tcp_add(struct net_task_req* t, struct netreq_tcp_add* req);
 static int on_tcp_accept(struct pps_net* net, struct socket_sockctx* sock, SOCK_FD fd, SOCK_ADDR* addrRemote, int portRemote)
@@ -826,7 +1014,7 @@ static int on_tcp_accept(struct pps_net* net, struct socket_sockctx* sock, SOCK_
 	struct socket_ctx* ctxDst = sock_get_ctx(net->sockMgr, idxCtx);
 	SOCK_RT_BEGIN(ctxDst);
 	init_tcp_channel_ctx(netDst, ctxDst, svrCfg->sendBuf, svrCfg->recvBuf, 
-		&fd, addrRemote, portRemote);
+		&fd, addrRemote, portRemote, svrCfg->protocolCfg);
 	SOCK_RT_END(ctxDst);
 	printf("on_tcp_accept(), idx=%d, cnt=%d, fd=%d\n", ctxDst->idx, ctxDst->cnt4Net, fd);  // debug
 	// send to net

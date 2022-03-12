@@ -32,12 +32,12 @@ pps.sleep(1000*6)
 log.info('will read msg')
 
 --[[]]
-while(true)
+while(false)
 do
-	--local msg,sz,trunc = sock.read(sid)
+	local msg,sz,trunc = sock.read(sid)
 	--local msg,sz,trunc = sock.read(sid,3)
 	--local msg,sz,trunc = sock.readlen(sid,5)
-	local msg,sz,trunc = sock.readline(sid,'ab')
+	--local msg,sz,trunc = sock.readline(sid,'ab')
 
 	--print('msgType=', type(msg))
 	if msg then

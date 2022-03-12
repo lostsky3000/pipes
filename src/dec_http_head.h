@@ -116,12 +116,12 @@ inline int dechh_headerit_init(struct dec_http_head* d)
 	}
 	return 0;
 }
-inline const char* dechh_headerit_next(struct dec_http_head* d, int* pKeyLen, char** ptrVal, int* pValLen)
+inline char* dechh_headerit_next(struct dec_http_head* d, int* pKeyLen, char** ptrVal, int* pValLen)
 {
 	if (d->state == DECHH_STATE_DONE) {
 		if(++d->headLenCnt <= d->headerNum){
 			int keyLen = *((uint16_t*)(d->buf + d->fieldLenCnt));
-			const char* key = d->buf + d->fieldLenCnt + 2;
+			char* key = d->buf + d->fieldLenCnt + 2;
 			d->fieldLenCnt += 2 + keyLen + 1;
 			*pKeyLen = keyLen;
 			//

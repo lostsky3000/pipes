@@ -5,20 +5,27 @@
 #include <cstring>
 
 // return:  -1: not done   0:has done(succ)  >0: has done(errCode)
-typedef int(*FN_DECODE_CONN_CHECK)(struct tcp_decode*d, char* buf, int bufSize, int& readBytes);
+typedef int(*FN_DECODE_CONN_CHECK)(struct tcp_decode*d, char* buf, int bufSize, int& checkedBytes);
 
+typedef int(*FN_DECODE_PACK_CHECK)(struct tcp_decode*d, uint8_t* buf, int bufSize, int& checkedBytes);
+
+typedef int(*FN_DECODE_CONN_RSP_IMPL)(void* ud, const char* buf, int sz);
+typedef int(*FN_DECODE_CONN_RSP)(struct tcp_decode*d, void* ud, FN_DECODE_CONN_RSP_IMPL impl);
+
+struct protocol_cfg;
 struct tcp_decode
 {
 	int16_t protocol;
 	int16_t connDone;
 	int connRet;
 	FN_DECODE_CONN_CHECK cbConnCheck;
+	FN_DECODE_CONN_RSP cbConnRsp;
+	FN_DECODE_PACK_CHECK cbPackCheck;
 };
 
-struct protocol_cfg;
 struct tcp_decode* decode_new(struct protocol_cfg* cfg);
 void decode_reset(struct tcp_decode* d, struct protocol_cfg* cfg);
-
+int decode_destroy(struct tcp_decode* d);
 
 //
 struct dec_sep
