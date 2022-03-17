@@ -108,6 +108,7 @@ struct read_buf_block
 	int32_t cap;
 	int32_t size4Fill;
 	int32_t size4Read;
+	int32_t size4Decode;
 	char* buf;	
 	struct read_buf_block* next;
 };
@@ -122,17 +123,22 @@ struct read_runtime
 	bool sockClosed;
 	bool hasSendReadOver;
 	std::atomic<int8_t> readLock;
-	int hasProtocol;
-	int preLockOwner;
+	//int16_t hasProtocol;
+	int16_t protocolNeedDecode;
+	//
+	int16_t preLockOwner;
+
 	uint32_t sockCnt;
 	int32_t waitReadable;
 	int readWaitDecType;
 	std::atomic<int32_t> readable;
+	std::atomic<int32_t> readable4Dec;
 	std::atomic<uint32_t> fillBufIdx;
 	uint32_t fillBufIdx4Net;
 	std::atomic<uint32_t> readBufIdx;
 	struct read_buf_block* curFillBuf;
 	struct read_buf_block* curReadBuf;
+	struct read_buf_block* curDecodeBuf;
 	struct read_buf_queue queReading;
 	struct read_buf_queue queFree;
 	struct read_decode* curDec;
@@ -191,6 +197,7 @@ inline void rdbuf_reset(struct read_buf_block* b, int32_t newCap, uint32_t idx)
 	b->next = nullptr;
 	b->size4Fill = 0;
 	b->size4Read = 0;
+	b->size4Decode = 0;
 }
 inline struct read_buf_block* rdbuf_new(int32_t cap, uint32_t idx)	
 {
@@ -315,6 +322,8 @@ struct socket_ctx
 	bool readOver4Net;
 	int16_t type;
 	int16_t idxNet;
+	//
+	int32_t hasProtocol;
 	//
 	int32_t idx;
 	std::atomic<uint32_t> cnt;
@@ -467,12 +476,19 @@ typedef int(*FN_READDEC_INIT)(struct read_runtime* run, struct read_arg* arg);
 int sockdec_init_now(struct read_runtime* run, struct read_arg* arg);
 int sockdec_init_len(struct read_runtime* run, struct read_arg* arg);
 int sockdec_init_sep(struct read_runtime* run, struct read_arg* arg);
-typedef int(*FN_READDEC_READ)(struct read_runtime* run, int* notifyReadable, int*readableUsed, int* trunc);
-int sockdec_read_sep(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc);
-int sockdec_read_len(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc);
-int sockdec_read_now(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc);
+typedef int(*FN_READDEC_READ)(struct read_runtime* run, int* notifyReadable, int*readableUsed);
+int sockdec_read_sep(struct read_runtime* run, int* waitReadable, int*readableUsed);
+int sockdec_read_len(struct read_runtime* run, int* waitReadable, int*readableUsed);
+int sockdec_read_now(struct read_runtime* run, int* waitReadable, int*readableUsed);
 
 bool sockdec_sep_seek(struct read_decode_sep* d, int readableBytes);
+
+//
+int sockprotocol_read_conn(struct read_runtime* run, int readable, struct tcp_decode* dec);
+int sockprotocol_pack_head(struct read_runtime* run, int& readable, struct tcp_decode* dec);
+int sockprotocol_pack_dec_body(struct read_runtime* run, int readable4Dec, struct tcp_decode* dec);
+
+int sockprotocol_pack_read_body(struct read_runtime* run, struct tcp_decode* dec);
 
 #endif // !PPS_SOCKET_H
 

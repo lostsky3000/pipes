@@ -1,4 +1,5 @@
 #include "pps_socket.h"
+#include "tcp_decode.h"
 
 int32_t sock_slot_alloc(struct socket_mgr* mgr)
 {
@@ -113,17 +114,11 @@ int sockdec_init_sep(struct read_runtime* run, struct read_arg* arg)
 
 
 //
-static int read_now_inner(struct read_runtime* run, int readableOri, int* waitReadable, int* trunc)
+static int read_now_inner(struct read_runtime* run, int readableOri, int* waitReadable)
 {
 	if (readableOri < 1) {   // no readable data
 		*waitReadable = 1;
 		return 0;
-	}
-	if (readableOri > run->readPackMax) {   // need trunc
-		readableOri = run->readPackMax;
-		*trunc = 1;
-	} else {
-		*trunc = 0;
 	}
 	//uint32_t fillBufIdx = run->fillBufIdx.load(std::memory_order_acquire);
 	struct read_buf_block* buf = run->curReadBuf;
@@ -153,13 +148,13 @@ static int read_now_inner(struct read_runtime* run, int readableOri, int* waitRe
 	run->readable.fetch_sub(writeCnt, std::memory_order_release);
 	return 1;
 }
-int sockdec_read_now(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc)
+int sockdec_read_now(struct read_runtime* run, int* waitReadable, int*readableUsed)
 {
 	int readableOri = run->readable.load(std::memory_order_acquire);
 	*readableUsed = readableOri;
-	return read_now_inner(run, readableOri, waitReadable, trunc);
+	return read_now_inner(run, readableOri, waitReadable);
 }
-int sockdec_read_len(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc)
+int sockdec_read_len(struct read_runtime* run, int* waitReadable, int*readableUsed)
 {
 	struct read_decode_len* d = (struct read_decode_len*)run->curDec;
 	int readableOri = run->readable.load(std::memory_order_acquire);
@@ -168,7 +163,6 @@ int sockdec_read_len(struct read_runtime* run, int* waitReadable, int*readableUs
 		*waitReadable = d->readLen;
 		return 0;
 	}
-	*trunc = 0;
 	readableOri = d->readLen;
 	struct read_buf_block* buf = run->curReadBuf;
 	int writeCnt = 0;
@@ -299,24 +293,168 @@ static int read_sep_inner(struct read_runtime* run, int* waitReadable, int reada
 	//d->seekedBytes = 0;
 	return 1;
 }
-int sockdec_read_sep(struct read_runtime* run, int* waitReadable, int*readableUsed, int* trunc)
+int sockdec_read_sep(struct read_runtime* run, int* waitReadable, int*readableUsed)
 {
 	int readableOri = run->readable.load(std::memory_order_acquire);
 	*readableUsed = readableOri;
 	if (read_sep_inner(run, waitReadable, readableOri)) { // read succ & no trunc
-		*trunc = 0;   // no trunc
+		//*trunc = 0;   // no trunc
 		return 1;
 	}
+	/*
 	// read nothing, check trunc
 	if (readableOri > run->readPackMax) {   // can trunc
 		assert(read_now_inner(run, readableOri, waitReadable, trunc));
 		assert(*trunc == 1);  //  debug
 		return 1;
-	}
+	}*/
 	return 0;
 }
 
-
+//
+int sockprotocol_read_conn(struct read_runtime* run, int readable, struct tcp_decode* dec)
+{
+	struct read_buf_block* buf = run->curReadBuf;
+	//int readable = readableOri;
+	int bytesHasRead = 0;
+	int ret = -1;
+	int bufLeft = 0;
+	int hasReadTotal = 0;
+	while (readable > 0) {
+		bufLeft = buf->cap - buf->size4Read;
+		if (bufLeft < 1) {  // curReadBuf read done, change to next buf
+			buf = buf->next;
+			run->curReadBuf = buf;
+			buf->size4Read = 0;
+			bufLeft = buf->cap;
+			run->readBufIdx.fetch_add(1, std::memory_order_release);
+		}
+		if (readable < bufLeft) {
+			ret = dec->cbConnCheck(dec, buf->buf + buf->size4Read, readable, bytesHasRead);
+		} else {
+			ret = dec->cbConnCheck(dec, buf->buf + buf->size4Read, bufLeft, bytesHasRead);
+		}
+		buf->size4Read += bytesHasRead;
+		readable -= bytesHasRead;
+		hasReadTotal += bytesHasRead;
+		if (ret > -1) {   // conn done
+			run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
+			if (run->protocolNeedDecode) {
+				run->readable4Dec.fetch_sub(hasReadTotal, std::memory_order_release);
+			}
+			return ret;
+		}
+	}
+	run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
+	if (run->protocolNeedDecode) {
+		run->readable4Dec.fetch_sub(hasReadTotal, std::memory_order_release);
+	}
+	return -1;
+}
+int sockprotocol_pack_head(struct read_runtime* run, int& readable, struct tcp_decode* dec)
+{
+	struct read_buf_block* buf = run->curReadBuf;
+	//int readable = readableOri;
+	int bytesHasRead = 0;
+	int ret = -1;
+	int bufLeft = 0;
+	int hasReadTotal = 0;
+	while (readable > 0) {
+		bufLeft = buf->cap - buf->size4Read;
+		if (bufLeft < 1) {  // curReadBuf read done, change to next buf
+			buf = buf->next;
+			run->curReadBuf = buf;
+			buf->size4Read = 0;
+			bufLeft = buf->cap;
+			run->readBufIdx.fetch_add(1, std::memory_order_release);
+		}
+		if (readable < bufLeft) {
+			ret = dec->cbPackHead(dec, (uint8_t*)buf->buf + buf->size4Read, readable, bytesHasRead);
+		} else {
+			ret = dec->cbPackHead(dec, (uint8_t*)buf->buf + buf->size4Read, bufLeft, bytesHasRead);
+		}
+		buf->size4Read += bytesHasRead;
+		readable -= bytesHasRead;
+		hasReadTotal += bytesHasRead;
+		if (ret > -1) {   // parse head done
+			run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
+			if (run->protocolNeedDecode) {
+				run->readable4Dec.fetch_sub(hasReadTotal, std::memory_order_release);
+			}
+			return ret;
+		}
+	}
+	run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
+	if (run->protocolNeedDecode) {
+		run->readable4Dec.fetch_sub(hasReadTotal, std::memory_order_release);
+	}
+	return -1;
+}
+int sockprotocol_pack_dec_body(struct read_runtime* run, int readable4Dec, struct tcp_decode* dec)
+{
+	struct read_buf_block* buf = run->curDecodeBuf;
+	int bytesHasRead = 0;
+	int hasDecTotal = 0;
+	int ret = -1;
+	int bufLeft = 0;
+	while (readable4Dec > 0) {
+		bufLeft = buf->cap - buf->size4Decode;
+		if (bufLeft < 1) {  // curDecodeBuf decode done, change to next buf
+			buf = buf->next;
+			run->curDecodeBuf = buf;
+			buf->size4Decode = 0;
+			bufLeft = buf->cap;
+			//run->readBufIdx.fetch_add(1, std::memory_order_release);
+		}
+		if (readable4Dec < bufLeft) {
+			ret = dec->cbPackDecBody(dec, (uint8_t*)buf->buf + buf->size4Decode, readable4Dec, bytesHasRead);
+		} else {
+			ret = dec->cbPackDecBody(dec, (uint8_t*)buf->buf + buf->size4Decode, bufLeft, bytesHasRead);
+		}
+		buf->size4Decode += bytesHasRead;
+		readable4Dec -= bytesHasRead;
+		hasDecTotal += bytesHasRead;
+		if (ret > -1) {   // parse head done
+			run->readable4Dec.fetch_sub(hasDecTotal, std::memory_order_release);
+			return ret;
+		}
+	}
+	run->readable4Dec.fetch_sub(hasDecTotal, std::memory_order_release);
+	return -1;
+}
+int sockprotocol_pack_read_body(struct read_runtime* run, struct tcp_decode* d)  // ensure succ
+{
+	int readableOri = d->curPackBodyLen - d->curPackBodyReadCnt;
+	int readable = readableOri;
+	struct read_buf_block* buf = run->curReadBuf;
+	int writeCnt = 0;
+	while (readable > 0) {
+		int bufLeft = buf->cap - buf->size4Read;
+		if (bufLeft < 1) {   // curReadBuf read done, change to next buf
+			buf = buf->next;
+			run->curReadBuf = buf;
+			buf->size4Read = 0;
+			bufLeft = buf->cap;
+			run->readBufIdx.fetch_add(1, std::memory_order_release);
+		}
+		if (readable < bufLeft) {
+			run->cbRead(readableOri, writeCnt, buf->buf + buf->size4Read, readable, run->udRead);
+			buf->size4Read += readable;
+			writeCnt += readable;
+			readable = 0;
+		} else {
+			run->cbRead(readableOri, writeCnt, buf->buf + buf->size4Read, bufLeft, run->udRead);
+			buf->size4Read = buf->cap;
+			writeCnt += bufLeft;
+			readable -= bufLeft;
+		}
+	}
+	d->curPackBodyReadCnt = d->curPackBodyLen;
+	d->cbPackReset(d);
+	//
+	run->readable.fetch_sub(writeCnt, std::memory_order_release);
+	return 1;
+}
 
 //
 void sockmgr_init_main_thread(struct socket_mgr* mgr, struct pipes* pipes)

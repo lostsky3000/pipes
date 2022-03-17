@@ -33,6 +33,8 @@ struct pps_worker
 	int arrPtrCharSize;
 	int* arrInt;
 	int arrIntSize;
+	//
+	struct net_helper* netHelper;
 };
 
 void worker_thread(struct pps_worker* wk);

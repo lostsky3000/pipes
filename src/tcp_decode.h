@@ -4,23 +4,45 @@
 #include <cstdint>
 #include <cstring>
 
-// return:  -1: not done   0:has done(succ)  >0: has done(errCode)
+// return:  -1:not done   0:done(succ)  >0:done(errCode)
 typedef int(*FN_DECODE_CONN_CHECK)(struct tcp_decode*d, char* buf, int bufSize, int& checkedBytes);
 
-typedef int(*FN_DECODE_PACK_CHECK)(struct tcp_decode*d, uint8_t* buf, int bufSize, int& checkedBytes);
+typedef int(*FN_DECODE_RSP_IMPL)(void* ud, const char* buf, int sz);
+typedef int(*FN_DECODE_RSP)(struct tcp_decode*d, void* ud, FN_DECODE_RSP_IMPL impl);
 
-typedef int(*FN_DECODE_CONN_RSP_IMPL)(void* ud, const char* buf, int sz);
-typedef int(*FN_DECODE_CONN_RSP)(struct tcp_decode*d, void* ud, FN_DECODE_CONN_RSP_IMPL impl);
+// return:  -1:not done   0:done(succ)   >0:done(errCode)
+typedef int(*FN_DECODE_PACK_HEAD)(struct tcp_decode*d, uint8_t* buf, int bufSize, int& checkedBytes);
+
+// return:  -1:not done   0:done(succ)   >0:done(errCode)
+typedef int(*FN_DECODE_PACK_BODY)(struct tcp_decode*d, uint8_t* buf, int bufSize, int& checkedBytes);
+
+typedef int(*FN_DECODE_PACK_RESET)(struct tcp_decode*d);
+
+#define TCPDEC_STATE_PACK_ERROR -1
+#define TCPDEC_STATE_CONN_CHECKING 1
+#define TCPDEC_STATE_CONN_DONE 2
+#define TCPDEC_STATE_PACK_HEAD 3
+#define TCPDEC_STATE_PACK_DEC_BODY 4
+#define TCPDEC_STATE_PACK_READ_BODY 5
+//
+#define TCPDEC_STATE_INNER_MSG 6
+//#define TCPDEC_STATE_CLOSE 6
 
 struct protocol_cfg;
 struct tcp_decode
 {
-	int16_t protocol;
-	int16_t connDone;
-	int connRet;
+	int8_t protocol;
+	int8_t state;
+	int8_t errCode;
+	int8_t packNeedDecode;
+	int32_t curPackBodyLen;
+	int32_t curPackBodyReadCnt;
+	int32_t innerMsg;
 	FN_DECODE_CONN_CHECK cbConnCheck;
-	FN_DECODE_CONN_RSP cbConnRsp;
-	FN_DECODE_PACK_CHECK cbPackCheck;
+	FN_DECODE_RSP cbConnRsp;
+	FN_DECODE_PACK_HEAD cbPackHead;
+	FN_DECODE_PACK_BODY cbPackDecBody;
+	FN_DECODE_PACK_RESET cbPackReset;
 };
 
 struct tcp_decode* decode_new(struct protocol_cfg* cfg);

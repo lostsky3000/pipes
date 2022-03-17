@@ -7,6 +7,7 @@
 #include "pps_config.h"
 #include "pool_linked.h"
 #include "pps_timer.h"
+#include "net_helper.h"
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -501,6 +502,9 @@ int worker_init_main_thread(struct pps_worker* wk, struct pipes* pipes, uint32_t
 	wk->arrIntSize = 0;
 	wk->plkSvcWaitFree = const_cast<struct pool_linked<struct pps_service*>*>(plk_create<struct pps_service*>());
 	wk->svcWaitFreeNum = 0;
+	//
+	wk->netHelper = new struct net_helper;
+	nethp_init(wk->netHelper);
 	return 1;
 }
 int worker_deinit_main_thread(struct pps_worker* wk)
@@ -508,6 +512,9 @@ int worker_deinit_main_thread(struct pps_worker* wk)
 	mpmc_destroy(wk->queTask);
 	pps_free(wk->tmpBuf.buf);
 	plk_destroy(wk->plkSvcWaitFree);
+	//
+	nethp_deinit(wk->netHelper);
+	delete wk->netHelper;
 	return 1;	
 }
 
@@ -522,10 +529,15 @@ int worker_exclusive_init(struct pps_worker* wk, struct pipes* pipes)
 	wk->arrPtrCharSize = 0;
 	wk->arrInt = nullptr;
 	wk->arrIntSize = 0;
+	//
+	wk->netHelper = new struct net_helper;
+	nethp_init(wk->netHelper);
 	return 1;
 }
 int worker_exclusive_deinit(struct pps_worker* wk)
 {
 	pps_free(wk->tmpBuf.buf);
+	nethp_deinit(wk->netHelper);
+	delete wk->netHelper;
 	return 1;
 }

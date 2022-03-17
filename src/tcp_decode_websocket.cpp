@@ -20,6 +20,8 @@ struct tcp_decode_websocket* decws_new(struct protocol_cfg_websocket* cfg)
 	d->bufSecKeyRsp = nullptr;
 	d->bufSecKeyRspLen = 0;
 	//
+	d->head.packNeedDecode = 1;
+	//
 	decws_reset(d, cfg);
 	return d;
 }
@@ -60,9 +62,9 @@ void decws_destroy(struct tcp_decode_websocket* d)
 	delete d;
 }
 
-#define STATE_OPCODE 1
-#define STATE_LENGTH 2
-#define STATE_MASK 3
+#define STATE_ERR -1
+#define STATE_PACK_HEAD 1
+#define STATE_PACK_BODY 2
 
 static const int HEADER_KEY_NUM = 4;
 static const char* HEADER_KEY[4] = { "Connection", "Upgrade",   "Sec-WebSocket-Version", "Sec-WebSocket-Key"};
@@ -73,8 +75,9 @@ static const int HEADER_VAL_NUM = 3;
 int decws_conn_check(struct tcp_decode*dec, char* buf, int bufSize, int& readBytes)
 {
 	readBytes = 0;
-	if(dec->connDone){  // conn has done
-		return dec->connRet;
+	int8_t& decState = dec->state;
+	if(decState == TCPDEC_STATE_CONN_DONE){  // conn has done
+		return dec->errCode;
 	}
 	struct tcp_decode_websocket* d = (struct tcp_decode_websocket*)dec;
 	struct dec_http_head* decHead = d->decHttpHead;
@@ -97,9 +100,9 @@ int decws_conn_check(struct tcp_decode*dec, char* buf, int bufSize, int& readByt
 					if(strcmp(key, HEADER_KEY[i]) == 0){   // key match
 						if(i < HEADER_VAL_NUM){   // val must match
 							if(strcmp(val, HEADER_VAL[i]) != 0){   //val not match
-								dec->connDone = 1;
-								dec->connRet = 400;  // means response status code(bad request)
-								return dec->connRet;
+								decState = TCPDEC_STATE_CONN_DONE;
+								dec->errCode = 400;  // means response status code(bad request)
+								return dec->errCode;
 							}
 						}
 						if(i == 3){  // Sec-WebSocket-Key, mark val
@@ -123,14 +126,14 @@ int decws_conn_check(struct tcp_decode*dec, char* buf, int bufSize, int& readByt
 			}
 		}
 		if(validHeaderCnt < HEADER_KEY_NUM){
-			dec->connDone = 1;
-			dec->connRet = 400;  // means response status code(bad request)
-			return dec->connRet;
+			decState = TCPDEC_STATE_CONN_DONE;
+			dec->errCode = 400;  // means response status code(bad request)
+			return dec->errCode;
 		}
 		if(noOrigin){
-			dec->connDone = 1;
-			dec->connRet = 403;  // response status code
-			return dec->connRet;
+			decState = TCPDEC_STATE_CONN_DONE;
+			dec->errCode = 403;  // response status code
+			return dec->errCode;
 		}
 		// check uri?
 
@@ -161,15 +164,15 @@ int decws_conn_check(struct tcp_decode*dec, char* buf, int bufSize, int& readByt
 		}
 		ucrypt_b64encode(digest, SHA1_DIGEST_SIZE, d->bufSecKeyRsp);
 		//
-		dec->connDone = 1;
-		// init pack dec state
-		d->state = STATE_OPCODE;
+		decState = TCPDEC_STATE_CONN_DONE;
+		dec->errCode = 0;
+
 		return 0;
 	}
 	if (ret > 0) {  // conn error
-		dec->connDone = 1;
-		dec->connRet = 400;   // means response status code(bad request)
-		return ret;
+		decState = TCPDEC_STATE_CONN_DONE;
+		dec->errCode = 400;   // means response status code(bad request)
+		return dec->errCode;
 	}
 	return -1;
 }
@@ -185,22 +188,22 @@ static const char* RSP_LINE_400 =
 "HTTP/1.1 400 Bad Request\r\n\r\n";
 static const int RSP_LINE_400_LEN = 28;
 
-int decws_conn_rsp(struct tcp_decode*dec, void* ud, FN_DECODE_CONN_RSP_IMPL impl)
+int decws_conn_rsp(struct tcp_decode*dec, void* ud, FN_DECODE_RSP_IMPL impl)
 {
-	if(!dec->connDone){   // error, assert?
+	if(dec->state == TCPDEC_STATE_CONN_CHECKING ){   // error, assert?
 		return 0;
 	}
 	struct tcp_decode_websocket* d = (struct tcp_decode_websocket*)dec;
 	//int len = strlen(RSP_LINE_400);   // debug
 	//dec->connRet = 400;  // debug
-	if(dec->connRet == 0){   // conn succ
+	if(dec->errCode == 0){   // conn succ
 		if(!impl(ud, RSP_LINE_SUCC, RSP_LINE_SUCC_LEN)){  // rsp failed
 			return 0;
 		}
 		if(!impl(ud, d->bufSecKeyRsp, d->bufSecKeyRspLen + 4)){  //rsp failed
 			return 0;
 		}
-	}else if(dec->connRet == 403){   // no origin
+	}else if(dec->errCode == 403){   // no origin
 		if(!impl(ud, RSP_LINE_403, RSP_LINE_403_LEN)){
 			return 0;
 		}
@@ -212,21 +215,122 @@ int decws_conn_rsp(struct tcp_decode*dec, void* ud, FN_DECODE_CONN_RSP_IMPL impl
 	return 1;
 }
 
-int decws_pack_check(struct tcp_decode*dec, uint8_t* buf, int bufSize, int& checkedBytes)
+
+static const uint8_t ENDIAN_CHECK[2] = { 0, 1 };
+static const bool IS_BIGENDIAN = *((uint16_t*)ENDIAN_CHECK) == 1;
+
+#define MASK_OPCODE 15 // 1111
+#define MASK_LEN 127   // 0111 1111
+
+static inline int on_error(struct tcp_decode*dec, int err)
+{
+	dec->errCode = err;
+	return err;
+}
+int decws_pack_reset(struct tcp_decode*dec)
 {
 	struct tcp_decode_websocket* d = (struct tcp_decode_websocket*)dec;
-	int& state = d->state;
+	dec->state = TCPDEC_STATE_PACK_HEAD;
+	d->packMetaRcvd = 0;
+	memset(d->packMeta, 0, sizeof(d->packMeta) / sizeof(uint8_t));
+	return 1;
+}
+// return:  -1:not done   0:done(succ)   >0:done(errCode)
+int decws_pack_head(struct tcp_decode*dec, uint8_t* buf, int bufSize, int& checkedBytes)
+{
+	checkedBytes = 0;
+	int8_t& state = dec->state;
+	if(state != TCPDEC_STATE_PACK_HEAD){
+		return on_error(dec, TCPDEC_STATE_PACK_ERROR);
+	}
+	struct tcp_decode_websocket* d = (struct tcp_decode_websocket*)dec;
+	uint8_t& metaRcvd = d->packMetaRcvd;
+	uint8_t* bufMeta = d->packMeta;
 	int seek = 0;
-	uint8_t ch;
-	if(state == STATE_OPCODE){
-		ch = buf[seek++];
-		state == STATE_LENGTH;
+	while (seek < bufSize) {
+		if (metaRcvd == 1) {  // 1st of len, check len
+			uint8_t ch = buf[seek++];
+			uint8_t len = ch & MASK_LEN;
+			bufMeta[metaRcvd] = ch;
+			if (len < 126) {
+				metaRcvd += 9;
+			} else if (len == 126) {
+				metaRcvd += 7;
+			} else if (len == 127) {
+				++metaRcvd;
+			} else if (len > 126) {  // invalid
+				checkedBytes += seek;
+				return on_error(dec, TCPDEC_STATE_PACK_ERROR);
+			}
+		} else if (metaRcvd > 1 && metaRcvd < 10) {   // reading len
+			if (IS_BIGENDIAN) {
+				bufMeta[metaRcvd++] = buf[seek++];
+			} else {
+				bufMeta[11 - metaRcvd] = buf[seek++];
+				++metaRcvd;
+			}
+		} else {
+			bufMeta[metaRcvd] = buf[seek++];
+			if (++metaRcvd == 14) {   // read pack-head done
+				if (!(bufMeta[1] >> 7)) {  // no mask from client, error
+					checkedBytes += seek;
+					return on_error(dec, TCPDEC_STATE_PACK_ERROR);
+				}
+				d->curOpCode = bufMeta[0] & MASK_OPCODE;
+				if(d->curOpCode == 1 || d->curOpCode == 2){  // has payload data
+					uint8_t lenFlag = bufMeta[1] & MASK_LEN;
+					if (lenFlag < 126) {
+						dec->curPackBodyLen = lenFlag;
+					} else if (lenFlag == 126) {
+						dec->curPackBodyLen = *(uint16_t*)(bufMeta + 6);
+					} else {
+						dec->curPackBodyLen = *(uint64_t*)(bufMeta + 2);
+					}
+					// change state
+					state = TCPDEC_STATE_PACK_DEC_BODY;
+					d->bodyDecCnt = 0;
+				}else {  // control frame, close, pong etc..
+					state = TCPDEC_STATE_INNER_MSG;
+					dec->innerMsg = d->curOpCode;
+					/*
+					if(d->curOpCode == 8){   // close
+						//state = TCPDEC_STATE_CLOSE;
+					}else{
+						decws_pack_reset(dec);
+					}
+					*/
+				}
+				checkedBytes += seek;
+				return 0;
+			}
+		}
 	}
-	if(state == STATE_LENGTH){
-		ch = buf[seek++];
-	}
-
 	checkedBytes += seek;
-	return 0;
+	return -1;
 }
 
+int decws_pack_dec_body(struct tcp_decode*dec, uint8_t* buf, int bufSize, int& checkedBytes)
+{
+	checkedBytes = 0;
+	int8_t& state = dec->state;
+	if(state != TCPDEC_STATE_PACK_DEC_BODY){
+		return 1;
+	}
+	struct tcp_decode_websocket* d = (struct tcp_decode_websocket*)dec;
+	uint32_t& byteCnt = d->bodyDecCnt;
+	uint32_t bodyLen = dec->curPackBodyLen;
+	uint8_t* bufMeta = d->packMeta;
+	int seek = 0;
+	while(seek < bufSize){
+		buf[seek] = (bufMeta[10 + byteCnt % 4]) ^ buf[seek];
+		++seek;
+		if(++byteCnt == bodyLen){  // done
+			checkedBytes += seek;
+			state = TCPDEC_STATE_PACK_READ_BODY;
+			dec->curPackBodyReadCnt = 0;
+			return 0;
+		}
+	}
+	checkedBytes += seek;
+	return -1;
+}

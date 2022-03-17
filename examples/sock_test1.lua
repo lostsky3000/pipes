@@ -27,24 +27,25 @@ if msg then
 end
 ]]
 
-pps.sleep(1000*6)
+pps.sleep(1000*3)
 
 log.info('will read msg')
 
 --[[]]
-while(false)
+while(true)
 do
-	local msg,sz,trunc = sock.read(sid)
-	--local msg,sz,trunc = sock.read(sid,3)
-	--local msg,sz,trunc = sock.readlen(sid,5)
-	--local msg,sz,trunc = sock.readline(sid,'ab')
+	local msg,sz = sock.read(sid)
+	--local msg,sz = sock.read(sid,3)
+	--local msg,sz = sock.readlen(sid,5)
+	--local msg,sz = sock.readline(sid,'ab')
 
 	--print('msgType=', type(msg))
 	if msg then
 		local strLen = string.len(msg)
-		print('recv, msg='..msg..' sz='..sz, 'strLen=',strLen, 'trunc=',trunc)
+		print('recv, msg='..msg..' sz='..sz, 'strLen=',strLen)
 		--pps.log('recv msg=',msg,' sz=',sz)
-		sock.send(sid, 'echo from svr,'..msg)
+		sock.wssend(sid, 'echo from svr,'..msg)
+		sock.wsping(sid)
 		if msg == 'close' then
 			log.info('recv close')
 			sock.close(sid)
@@ -57,12 +58,12 @@ do
 			pps.shutdown()
 		end
 	else
-		if sz then
-			log.info('conn closed, has data: '..sz..', sz='..trunc)
+		if sz then  -- inner msg 
+			log.info('inner msg: '..sz)
 		else
 			log.info('conn closed, no data')
+			break
 		end
-		break
 	end
 end
 

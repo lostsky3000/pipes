@@ -30,5 +30,6 @@ inline int64_t sysapi_clock_now_ms(struct time_clock& tmBegin)
 uint64_t sysapi_clock_since_epoch(struct time_clock& tm);
 uint64_t sysapi_system_now();
 
+
 #endif // !PPS_SYSAPI_H
 

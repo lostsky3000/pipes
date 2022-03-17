@@ -86,11 +86,18 @@ static void on_net_msg(struct net_msg*m, void* adapter, struct pps_service* s, s
 					tmp.tmpBuf = &lctx->svc->curWorker->tmpBuf;
 					arg.ud = &tmp;
 					arg.cb = lpps_read_msg;
-					int trunc;
-					int retRead = netapi_tcp_read(s->pipes, ret->sockId.idx, ret->sockId.cnt, &arg, &trunc);
-					if(retRead > 0){  // has read sth
-						lua_pushinteger(L, ret->session);
-						lua_pushinteger(L, tmp.total);
+					int retRead = netapi_tcp_read(s->pipes, ret->sockId.idx, ret->sockId.cnt, &arg);
+					if(retRead > 0){  // read succ
+						if(retRead == 1){   // normal msg
+							lua_pushinteger(L, ret->session);
+							lua_pushinteger(L, tmp.total);
+						}else{  // >1, inner msg
+							lua_pushnil(L);
+							lua_pushinteger(L, ret->session);
+							lua_pushinteger(L, retRead);
+						}
+						argNum = 4;
+						/*
 						if (retRead == 1) {	// normal read
 							lua_pushboolean(L, true);
 							lua_pushboolean(L, trunc);
@@ -98,7 +105,7 @@ static void on_net_msg(struct net_msg*m, void* adapter, struct pps_service* s, s
 						} else {   // last read
 							lua_pushboolean(L, false);
 							argNum = 5;
-						}
+						}*/
 					}else if(retRead == 0){    // continue read wait
 						lua_pop(L, 1);
 						return;

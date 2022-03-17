@@ -6,6 +6,7 @@
 #include "tcp_protocol.h"
 #include "pps_net_api.h"
 #include "pps_service.h"
+#include "net_helper.h"
 #include <thread>
 #include <cassert>
 
@@ -90,8 +91,7 @@ static struct read_buf_block* expand_fill_buf(struct read_runtime* run, int recv
 	run->fillBufIdx.store(run->fillBufIdx4Net, std::memory_order_release);
 	return buf;
 }
-static int read_protocol_conn(struct read_runtime* run, int readableOri, struct tcp_decode* dec);
-static int read_protocol_pack(struct read_runtime* run, int readableOri, struct tcp_decode* dec);
+
 static int conn_rsp(void* ud, const char* buf, int sz)
 {
 	SOCK_FD* pFd = (SOCK_FD*)ud;
@@ -120,15 +120,20 @@ static int conn_rsp(void* ud, const char* buf, int sz)
 	}
 	return 1;
 }
+static int pack_inner_rsp(void* ud, const char* buf, int sz)
+{
+	return 1;
+}
 static inline bool notify_svc_conn_in(struct pps_net* net, struct socket_ctx* ctx);
 static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 {
 	struct socket_ctx* ctx = sock->main; 
 	struct read_runtime* run = &ctx->readRuntime;
-	struct read_buf_block* buf;
+	bool& rdSockClosed = run->sockClosed;
 	int readable = 0;
-	// 
-	if (!run->sockClosed) {
+	int readable4Dec = 0;
+	if (!rdSockClosed) {
+		struct read_buf_block* buf;
 		// recycle bufs that has read
 		uint32_t readBufIdx = run->readBufIdx.load(std::memory_order_acquire);
 		while ((buf = rdbuf_front(&run->queReading))) {
@@ -149,12 +154,15 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 			if (read > 0) {   // read some
 				buf->size4Fill += read;
 				readable = run->readable.fetch_add(read, std::memory_order_release) + read;
+				if(run->protocolNeedDecode){
+					readable4Dec = run->readable4Dec.fetch_add(read, std::memory_order_release) + read;
+				}
 				if (buf->size4Fill >= buf->cap) {  // cur buf is full, expand
 					buf = expand_fill_buf(run, ctx->recvBufLen);
 				}
 			} else {  //  no more data or conn has gone
 				if(read != READ_RET_AGAIN) {  // close or halfClose
-					run->sockClosed = true;
+					rdSockClosed = true;
 					sock_read_atom_release(ctx);        // make sockClosed visible for svc read
 					if(read == READ_RET_HALF_CLOSE && ctx->pollOutReg) {  // half close & has unsend data 
 						if(ctx->pollInReg) { // unReg pollIn
@@ -174,79 +182,93 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 			}
 		}
 	}
-	if (readable == 0) {
-		readable = run->readable.load(std::memory_order_relaxed);
-	}
 	int32_t& waitReadable = run->waitReadable;
 	bool hasReadWait = (waitReadable > 0);
-	bool rdSockClosed = run->sockClosed;
+	bool readWaitTrig = false;
 	if(!rdSockClosed){
-		// check protocol conn done
-		if(run->hasProtocol){
+		if(ctx->hasProtocol){
 			struct tcp_decode* decTcp = run->tcpDec;
-			if(!decTcp->connDone){  // conn not done, just read for checking conn
+			if(decTcp->state == TCPDEC_STATE_CONN_CHECKING){  // conn not done, just read for checking conn
 				//sock_read_atom_acquire(ctx);
-				int connRet = read_protocol_conn(run, readable, decTcp);
+				int connRet = sockprotocol_read_conn(run, readable, decTcp);
+				if(connRet == 0){   // init packread
+					decTcp->cbPackReset(decTcp);
+				}
 				sock_read_atom_release(ctx);
 				if(connRet > -1){  // connDone, rsp to client
-					int rspRet = decTcp->cbConnRsp(decTcp, &sock->fd, conn_rsp);
-					if(connRet > 0 || !rspRet || !notify_svc_conn_in(net, ctx)){  
-						// conn check failed || send rsp failed || notify svc failed(svc gone),  close & recycle
+					if(connRet > 0 || !decTcp->cbConnRsp(decTcp, &sock->fd, conn_rsp)
+							|| !notify_svc_conn_in(net, ctx)){
+						// conn check failed || send rsp failed || notify svc failed(svc gone), close & recycle
 						close_ctx_fd(net, ctx);
 						recycle_ctx(net, ctx);
+						return 0;
 					}
 				}
 				return 1;
 			}
-			int packRet = read_protocol_pack(run, readable, decTcp);
-			int n = 1;
+			if(hasReadWait){   // has readWait check
+				if (decTcp->state == TCPDEC_STATE_PACK_HEAD) {
+					int headRet = sockprotocol_pack_head(run, readable, decTcp);
+					if (headRet > 0) {   // parse pack-head error
+						sock_read_atom_release(ctx);
+						// do close
+						return 0;
+					}
+					if (headRet == 0) {   // parse packhead done, sync decode&readbuf
+						run->curReadBuf->size4Decode = run->curReadBuf->size4Read;
+						run->curDecodeBuf = run->curReadBuf;
+						/*
+						if(decTcp->state == TCPDEC_STATE_CLOSE){  // do close
+							sock_read_atom_release(ctx);
+							// do close
+							return 0;
+						}*/
+					}
+				}
+				if(decTcp->state == TCPDEC_STATE_INNER_MSG){   // got inner msg
+					readWaitTrig = true;
+				}
+				if (decTcp->state == TCPDEC_STATE_PACK_DEC_BODY && run->protocolNeedDecode) {
+					int bodyRet = sockprotocol_pack_dec_body(run, readable4Dec, decTcp);
+					if (bodyRet > 0) {   // parse body error
+						sock_read_atom_release(ctx);
+						// do close
+						return 0;
+					}
+					if (bodyRet == 0) {   // parse body done(succ)
+						readWaitTrig = true;
+					}
+				}
+				sock_read_atom_release(ctx);
+			}
+		}else{   // no protocol
+			if (hasReadWait) {  // has readwait task && not trig yet, check read wait trig
+				if (run->readWaitDecType == DECTYPE_SEP) {
+					struct read_decode_sep* dec = (struct read_decode_sep*)run->curDec;
+					if (sockdec_sep_seek(dec, readable)) {
+						readWaitTrig = true;
+					}else{   //check if packbuf is too long
+						if(readable >= run->readPackMax){   // pack too long, close
+							// do close ...
+						}
+					}
+					sock_read_atom_release(ctx);
+				} else {
+					if (readable >= waitReadable) {
+						readWaitTrig = true;
+					}
+				}
+			}
 		}
-	}else{
-	
-	}
-	if(readable >= ctx->recvBufLen && !rdSockClosed){   // recvBuf is full, check pause read
-		bool pauseRead = true;
-		if(run->hasProtocol){  // check conndone
-		
-		}
-		if(pauseRead){
+		// check pause read
+		if(readable >= ctx->recvBufLen && (!hasReadWait || readWaitTrig)){
 			ctx->pollInReg = false;
 			poll_evt_mod(net->pollFd, sock);
 			printf("on_tcp_read(), readBuf is full, remove pollIn\n");         // debug
 		}
 	}
-	
-	/*
-	// check readWait task
-	if(hasReadWait && !readWaitTrig){  // has readwait task && not trig yet, check read wait trig
-	if (run->readWaitDecType == DECTYPE_SEP) {
-	struct read_decode_sep* dec = (struct read_decode_sep*)run->curDec;
-	if (sockdec_sep_seek(dec, readable)) {
-	readWaitTrig = true;
-	}
-	sock_read_atom_release(ctx);
-	}else{
-	if (readable >= waitReadable) {
-	readWaitTrig = true;
-	}
-	}
-	}
-	// check recvbuf is full
-	if(readable >= ctx->recvBufLen && (!hasReadWait || readWaitTrig)){   // recvBuf full, check pause pollIn
-	ctx->pollInReg = false;
-	poll_evt_mod(net->pollFd, sock);
-	printf("on_tcp_read(), readBuf is full, remove pollIn\n");         // debug
-	break;
-	}
-	*/
-	if (hasReadWait) {   // there is a readWait, check notify
-		bool readWaitTrig = false;
-		if(readable == 0){
-			readable = run->readable.load(std::memory_order_relaxed);
-		}
-		//if(run->sockClosed || run->readable.load(std::memory_order_relaxed) >= waitReadable) {
-		if (readWaitTrig || run->sockClosed) {
-			// notify svc
+	if(hasReadWait){    // has readWait
+		if (readWaitTrig || rdSockClosed) {   // notify svc
 			waitReadable = -1;
 			struct tcp_read_wait_ret ret;
 			ret.session = ctx->src.session;
@@ -256,75 +278,6 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 		}
 	}
 	return 1;
-}
-
-static int read_protocol_conn(struct read_runtime* run, int readableOri, struct tcp_decode* dec)
-{
-	struct read_buf_block* buf = run->curReadBuf;
-	int readable = readableOri;
-	int bytesHasRead = 0;
-	int ret = -1;
-	int bufLeft = 0;
-	int hasReadTotal = 0;
-	while (readable > 0) {
-		bufLeft = buf->cap - buf->size4Read;
-		if (bufLeft < 1) {  // curReadBuf read done, change to next buf
-			buf = buf->next;
-			run->curReadBuf = buf;
-			buf->size4Read = 0;
-			bufLeft = buf->cap;
-			run->readBufIdx.fetch_add(1, std::memory_order_release);
-		}
-		if (readable < bufLeft) {
-			ret = dec->cbConnCheck(dec, buf->buf + buf->size4Read, readable, bytesHasRead);
-		} else {
-			ret = dec->cbConnCheck(dec, buf->buf + buf->size4Read, bufLeft, bytesHasRead);
-		}
-		buf->size4Read += bytesHasRead;
-		readable -= bytesHasRead;
-		hasReadTotal += bytesHasRead;
-		if(ret > -1){   // conn done
-			run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
-			return ret;
-		}
-	}
-	run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
-	return -1;
-}
-static int read_protocol_pack(struct read_runtime* run, int readableOri, struct tcp_decode* dec)
-{
-	struct read_buf_block* buf = run->curReadBuf;
-	int readable = readableOri;
-	int bytesHasRead = 0;
-	int ret = -1;
-	int bufLeft = 0;
-	int hasReadTotal = 0;
-	while (readable > 0) {
-		bufLeft = buf->cap - buf->size4Read;
-		if (bufLeft < 1) {  // curReadBuf read done, change to next buf
-			buf = buf->next;
-			run->curReadBuf = buf;
-			buf->size4Read = 0;
-			bufLeft = buf->cap;
-			run->readBufIdx.fetch_add(1, std::memory_order_release);
-		}
-		if (readable < bufLeft) {
-			//ret = dec->cbConnCheck(dec, buf->buf + buf->size4Read, readable, bytesHasRead);
-			ret = dec->cbPackCheck(dec, (uint8_t*)buf->buf + buf->size4Read, readable, bytesHasRead);
-		} else {
-			//ret = dec->cbConnCheck(dec, buf->buf + buf->size4Read, bufLeft, bytesHasRead);
-			ret = dec->cbPackCheck(dec, (uint8_t*)buf->buf + buf->size4Read, bufLeft, bytesHasRead);
-		}
-		buf->size4Read += bytesHasRead;
-		readable -= bytesHasRead;
-		hasReadTotal += bytesHasRead;
-		if (ret > -1) {   // conn done
-			run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
-			return ret;
-		}
-	}
-	run->readable.fetch_sub(hasReadTotal, std::memory_order_release);
-	return -1;
 }
 
 static int on_tcp_send(struct pps_net* net, struct socket_sockctx* sock)
@@ -648,7 +601,7 @@ static bool do_tcp_add(struct netreq_src* src, struct pps_net* net, struct tcp_a
 	sbuf->size4Send = 0;
 	//
 	bool connDone = true;
-	if(run->hasProtocol){  // has protocol
+	if(ctx->hasProtocol){  // has protocol
 		struct tcp_decode* dec = run->tcpDec;
 		int readBytes;
 		int connRet = dec->cbConnCheck(dec, nullptr, 0, readBytes);
@@ -751,13 +704,51 @@ static bool do_read_wait(struct netreq_src* src, struct tcp_read_wait* req, stru
 	int decType = req->decType;
 	bool readWaitTrig = false;
 	if(readable > req->readableUsed){   // read new data after svc send readWait, check
-		if (decType == DECTYPE_SEP) {
+		if(ctx->hasProtocol){
 			sock_read_atom_acquire(ctx);
-			struct read_decode_sep* dec = (struct read_decode_sep*)run->curDec;
-			readWaitTrig = sockdec_sep_seek(dec, readable);
+			struct tcp_decode* decTcp = run->tcpDec;
+			if (decTcp->state == TCPDEC_STATE_PACK_HEAD) {
+				int headRet = sockprotocol_pack_head(run, readable, decTcp);
+				if (headRet > 0) {   // parse pack-head error
+					sock_read_atom_release(ctx);
+					// do close
+					return 0;
+				}
+				if (headRet == 0) {   // parse packhead done, sync decode&readbuf
+					run->curReadBuf->size4Decode = run->curReadBuf->size4Read;
+					run->curDecodeBuf = run->curReadBuf;
+					/*
+					if (decTcp->state == TCPDEC_STATE_CLOSE) {  // do close
+						sock_read_atom_release(ctx);
+						// do close
+						return 0;
+					}*/
+				}
+			}
+			if(decTcp->state == TCPDEC_STATE_INNER_MSG){   // got inner msg
+				readWaitTrig = true;
+			}
+			if (decTcp->state == TCPDEC_STATE_PACK_DEC_BODY && run->protocolNeedDecode) {
+				int bodyRet = sockprotocol_pack_dec_body(run, run->readable4Dec.load(std::memory_order_relaxed), decTcp);
+				if (bodyRet > 0) {   // parse body error
+					sock_read_atom_release(ctx);
+					// do close
+					return 0;
+				}
+				if (bodyRet == 0) {   // parse body done(succ)
+					readWaitTrig = true;
+				}
+			}
 			sock_read_atom_release(ctx);
-		} else {
-			readWaitTrig = (req->waitReadable <= readable);
+		}else{
+			if (decType == DECTYPE_SEP) {
+				sock_read_atom_acquire(ctx);
+				struct read_decode_sep* dec = (struct read_decode_sep*)run->curDec;
+				readWaitTrig = sockdec_sep_seek(dec, readable);
+				sock_read_atom_release(ctx);
+			} else {
+				readWaitTrig = (req->waitReadable <= readable);
+			}
 		}
 	}
 	if (readWaitTrig || run->sockClosed || ctx->closeCalled4Net) {
@@ -945,6 +936,7 @@ static void read_runtime_init(struct socket_ctx* ctx, int recvBufLen, uint32_t s
 	rdbuf_push(&run->queReading, buf);
 	run->curFillBuf = buf;
 	run->curReadBuf = buf;
+	run->curDecodeBuf = buf;
 	run->waitReadable = -1;
 	run->fillBufIdx4Net = 0;
 	run->fillBufIdx.store(0, std::memory_order_relaxed);
@@ -956,8 +948,9 @@ static void read_runtime_init(struct socket_ctx* ctx, int recvBufLen, uint32_t s
 	run->hasSendReadOver = false;
 	run->readWaitDecType = -1;
 	// init protocol decoder
+	run->protocolNeedDecode = 0;
 	if(protocolCfg){
-		run->hasProtocol = 1;
+		ctx->hasProtocol = 1;
 		if(run->tcpDec && run->tcpDec->protocol != protocolCfg->type){  // protocol not match
 			decode_destroy(run->tcpDec);
 			run->tcpDec = nullptr;
@@ -967,8 +960,12 @@ static void read_runtime_init(struct socket_ctx* ctx, int recvBufLen, uint32_t s
 		}else{
 			run->tcpDec = decode_new(protocolCfg);
 		}
+		if(run->tcpDec->packNeedDecode){
+			run->protocolNeedDecode = 1;
+			run->readable4Dec.store(0, std::memory_order_relaxed);
+		}
 	}else{
-		run->hasProtocol = 0;
+		ctx->hasProtocol = 0;
 	}
 	sock_read_unlock(ctx);
 }
@@ -1304,6 +1301,9 @@ int net_init_main_thread(struct pps_net* net, struct pipes* pipes, struct socket
 	net->connTimeoutNum = 0;
 	//
 	net->pSetFd = new std::unordered_set<SOCK_FD>();
+	//
+	struct net_helper* netHelper = new struct net_helper;
+	nethp_init(netHelper);
 	return 1;
 }
 void net_deinit_main_thread(struct pps_net* net)
@@ -1315,5 +1315,8 @@ void net_deinit_main_thread(struct pps_net* net)
 	plk_destroy(net->queUnSendMsg);
 	delete net->pSetFd;
 	minheap_destroy(net->queConnTimeout);
+	//
+	nethp_deinit(net->netHelper);
+	delete net->netHelper;
 }
 

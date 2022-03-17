@@ -118,18 +118,16 @@ end
 
 local function _read(id,dec,...)
 	local ss = _genCallId()
-	local data,sz,conti,trunc = _cs.read(id._i,id._c,ss,dec,...)
-	if data then  -- read sth
-		if conti then
-			return data,sz,trunc 
-		else     -- last read
-			return false,data,sz
-		end
+	local data,sz = _cs.read(id._i,id._c,ss,dec,...)
+	if data then  -- read succ
+		return data,sz
 	end
 	if sz == 0 then  -- read wait
 		return _coYield('r'..ss, true)
 	elseif sz == -1 then   -- sock has gone
 		return false
+	elseif sz > 0 then  -- protocol inner msg
+		return false, sz
 	elseif sz == -2 then   -- multi read 
 		error('concurrent read not allowed')
 	elseif sz == -3 then   -- 
@@ -137,11 +135,8 @@ local function _read(id,dec,...)
 	end
 	error('invalid read: '..sz)
 end
-function s.read(id,max)
-	if not max then
-		max = 65536
-	end
-	return _read(id,0,max)
+function s.read(id)
+	return _read(id,0)
 end
 function s.readlen(id,len)
 	return _read(id,1,len)
@@ -167,6 +162,28 @@ function s.send(id,data,sz)
 end
 
 
+function s.wssend(id,data,sz)
+	local ret = _cs.send(id._i,id._c,data,sz,1);
+	if ret > 0 then
+		return true
+	end
+	if ret == 0 then
+		return false
+	end
+	error('invalid wssend: '..ret)
+end
+function s.wsping(id)
+	local ret = _cs.send(id._i,id._c,data,sz,3);
+	if ret > 0 then
+		return true
+	end
+	if ret == 0 then
+		return false
+	end
+	error('invalid wsping: '..ret)
+end
+
+
 function s.test()
 	return _cs.test()
 end
@@ -176,17 +193,18 @@ end
 _c.dispatch(3,
 function(cmd,ss,...)
 	if cmd == 5 then  -- read wait ret
-		-- cmd,data, ss,sz,conti,trunc
+		-- cmd,data,ss,sz
 		local tb = {...}
 		local ok,err
-		if ss then  -- has data
-			if tb[3] then   -- normal read 
-				ok,err = _coResumeKey('r'..tb[1], ss, tb[2], tb[4])
-			else   -- last read 
-				ok,err = _coResumeKey('r'..tb[1], false, ss, tb[2])
+		if ss then  -- read succ
+			ok,err = _coResumeKey('r'..tb[1], ss, tb[2])
+		else  -- 
+			local sz = tb[2]
+			if sz and sz > 0 then  -- inner msg
+				ok,err = _coResumeKey('r'..tb[1], false, sz)
+			else  -- conn has gone,or error
+				ok,err = _coResumeKey('r'..tb[1], false)
 			end
-		else  -- no data, sock has gone
-			ok,err = _coResumeKey('r'..tb[1], false)
 		end
 		if not ok then
 			pps._procError(err)

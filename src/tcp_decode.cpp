@@ -6,8 +6,8 @@
 static inline void reset_decode(struct tcp_decode* d, struct protocol_cfg* cfg)
 {
 	d->protocol = cfg->type;
-	d->connDone = 0;
-	d->connRet = 0;
+	d->state = TCPDEC_STATE_CONN_CHECKING;
+	d->errCode = 0;
 }
 
 struct tcp_decode* decode_new(struct protocol_cfg* cfg)
@@ -18,7 +18,9 @@ struct tcp_decode* decode_new(struct protocol_cfg* cfg)
 		d = (struct tcp_decode*)dec;
 		d->cbConnCheck = decws_conn_check;
 		d->cbConnRsp = decws_conn_rsp;
-		d->cbPackCheck = decws_pack_check;
+		d->cbPackHead = decws_pack_head;
+		d->cbPackDecBody = decws_pack_dec_body;
+		d->cbPackReset = decws_pack_reset;
 	}
 	assert(d);
 	reset_decode(d, cfg);

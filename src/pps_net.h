@@ -83,6 +83,8 @@ struct pps_net
 	char bufAddr[SOCK_ADDR_STRLEN];
 	//
 	std::unordered_set<SOCK_FD>* pSetFd;
+	//
+	struct net_helper* netHelper;
 };
 
 void net_thread(struct pps_net* net);

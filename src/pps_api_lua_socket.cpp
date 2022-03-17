@@ -5,6 +5,7 @@
 #include "pps_service.h"
 #include "pps_worker.h"
 #include "tcp_protocol.h"
+#include "net_helper.h"
 #include <cstring>
 
 static int l_test(lua_State* L)
@@ -314,17 +315,17 @@ static int l_read(lua_State* L)
 	arg.ud = &tmp;
 	arg.cb = lpps_read_msg;
 	//
-	int ret,trunc;
+	int ret;
 	if (decType == DECTYPE_LEN) {
 		int readLen = luaL_checkinteger(L, 5);
 		if (readLen < 1) {
 			return luaL_error(L, "readlen arg invalid: %d", readLen);
 		}
-		arg.maxRead = readLen;
+		//arg.maxRead = readLen;
 		struct dec_arg_len a;
 		a.readLen = readLen;
 		arg.decArg = &a;
-		ret = netapi_tcp_read(s->pipes, sockIdx, sockCnt, &arg, &trunc);
+		ret = netapi_tcp_read(s->pipes, sockIdx, sockCnt, &arg);
 	}
 	else if (decType == DECTYPE_SEP) {
 		size_t slen = 0;
@@ -341,19 +342,29 @@ static int l_read(lua_State* L)
 		a.sep = (char*)sep;
 		a.sepLen = slen;
 		arg.decArg = &a;
-		ret = netapi_tcp_read(s->pipes, sockIdx, sockCnt, &arg, &trunc);
+		ret = netapi_tcp_read(s->pipes, sockIdx, sockCnt, &arg);
 	}
 	else {
+		/*
 		int readMax = luaL_checkinteger(L, 5);
 		if(readMax < 1){   // invalid
 			return luaL_error(L, "read, packmax invalid: %d", readMax);
 		}
 		arg.maxRead = readMax;
-		ret = netapi_tcp_read(s->pipes, sockIdx, sockCnt, &arg, &trunc);
+		*/
+		ret = netapi_tcp_read(s->pipes, sockIdx, sockCnt, &arg);
 	} 
 	//
-	if (ret > 0) {   // read sth
-		lua_pushinteger(L, tmp.total);  // read size
+	if (ret > 0) {   // read succ
+		if(ret == 1){  // normal msg
+			lua_pushinteger(L, tmp.total);  // read size
+			return 2;
+		}else{   // >1, inner msg
+			lua_pushnil(L);
+			lua_pushinteger(L, ret);
+			return 2;
+		}
+		/*
 		if(ret == 1) {   //  normal read
 			lua_pushboolean(L, true);  // isLastRead
 			lua_pushboolean(L, trunc);
@@ -361,7 +372,7 @@ static int l_read(lua_State* L)
 		}else {   // last read
 			lua_pushboolean(L, false);  // isLastRead
 			return 3;
-		}
+		}*/
 	}
 	else if (ret == 0) {  // no data now
 		lua_pushboolean(L, false);
@@ -379,18 +390,58 @@ static int l_send(lua_State* L)
 	int32_t sockIdx = luaL_checkinteger(L, 1);
 	uint32_t sockCnt = luaL_checkinteger(L, 2);
 	size_t sz = 0;
-	const char * data = luaL_checklstring(L, 3, &sz);
+	const char * data = lua_tolstring(L, 3, &sz); // luaL_checklstring(L, 3, &sz);
 	int isNum = 0;
 	int szReq = lua_tointegerx(L, 4, &isNum);
+	/*
 	if (isNum) {
 		if (szReq > sz) {
 			return luaL_error(L, "socket.send reqSize(%d) > realSize(%d)", szReq, sz);
 		}
 		sz = szReq;
 	}
-	// do send
+	*/
 	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
-	int ret = netapi_tcp_send(lctx->svc->pipes, sockIdx, sockCnt, data, sz);
+	int ret = 0;
+	// check encode type
+	int encType = lua_tointegerx(L, 5, &isNum);
+	if(isNum){   // specify encodeType
+		if(encType != 3){   // data cant be null
+			if (data == nullptr) {
+				return luaL_error(L, "socket.send data is null");
+			}
+			if (szReq > 0) {   // specify size
+				if (szReq > sz) {
+					return luaL_error(L, "socket.send reqSize(%d) > realSize(%d)", szReq, sz);
+				}
+				sz = szReq;
+			}
+		}
+		char* dataWrap;
+		if(encType == 1 || encType == 2 || encType == 3){  // websocket(1:text, 2:bin  3:ping)
+			if(encType == 3){
+				encType = 9;  // ping in websocket protocol
+			}
+			int szReal = 0;
+			dataWrap = nethp_wrap_wssend(lctx->svc->curWorker->netHelper, encType, data, sz, &szReal);
+			sz = szReal;
+		}else{
+			return luaL_error(L, "socket.send unknown encodeType: %d", encType);
+		}
+		ret = netapi_tcp_send(lctx->svc->pipes, sockIdx, sockCnt, dataWrap, sz);
+	}else{
+		if(data == nullptr){
+			return luaL_error(L, "socket.send data is null");
+		}
+		if(szReq > 0){   // specify size
+			if (szReq > sz) {
+				return luaL_error(L, "socket.send reqSize(%d) > realSize(%d)", szReq, sz);
+			}
+			sz = szReq;
+		}
+		ret = netapi_tcp_send(lctx->svc->pipes, sockIdx, sockCnt, data, sz);
+	}
+	// do send
 	lua_pushinteger(L, ret);
 	return 1;
 }
