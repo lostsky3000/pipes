@@ -102,7 +102,7 @@ static void shift_down(struct minheap_queue<T>* queue)
 template<typename T>
 void minheap_add(T udata, struct minheap_queue<T>* queue)
 {
-	if (queue->node_num >= queue->node_cap) //queue is full
+	if (queue->node_num >= queue->node_cap) //queue is full, expand
 	{
 		queue->node_cap *= 2;
 		struct minheap_node<T>* oldNodes = queue->nodes;

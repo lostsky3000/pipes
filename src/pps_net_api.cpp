@@ -75,6 +75,54 @@ static void send_read_over(struct pps_net* net, int32_t sockIdx, uint32_t sockCn
 	req.wait = &wait;
 	send_to_net(net, &req, enreq_read_over, nullptr);
 }
+
+// >0:read succ  0: read not done  <0: read error(need close)
+static int do_read(struct read_runtime* run, bool hasProtocol, int decType, int* pWaitReadable, int* pReadableUsed)
+{
+	int ret = 0;
+	if (hasProtocol) {
+		*pWaitReadable = 1;
+		int readable = run->readable.load(std::memory_order_acquire);
+		*pReadableUsed = readable;
+		struct tcp_decode* decTcp = run->tcpDec;
+		if (decTcp->state == TCPDEC_STATE_PACK_HEAD) {
+			int headRet = sockprotocol_pack_head(run, readable, decTcp);
+			if (headRet > 0) {   // parse pack-head error
+				//sock_read_unlock(ctx);
+				// do close
+				return -1;
+			}
+			if (headRet == 0) {   // parse packhead done, sync decode&readbuf
+				run->curReadBuf->size4Decode = run->curReadBuf->size4Read;
+				run->curDecodeBuf = run->curReadBuf;
+			}
+		}
+		if (decTcp->state == TCPDEC_STATE_PACK_DEC_BODY && run->protocolNeedDecode) {
+			int bodyRet = sockprotocol_pack_dec_body(run, run->readable4Dec.load(std::memory_order_relaxed), decTcp);
+			if (bodyRet > 0) {   // parse body error
+				//sock_read_unlock(ctx);
+				// do close
+				return -1;
+			}
+			if (bodyRet == 0) {   // parse body done(succ)
+				
+			}
+		}
+		if (decTcp->state == TCPDEC_STATE_PACK_READ_BODY) {
+			ret = sockprotocol_pack_read_body(run, decTcp);
+			assert(ret);  // ensure succ
+		}
+		if (!ret) {   // has not read msg
+			if (decTcp->state == TCPDEC_STATE_INNER_MSG) {  // got inner msg
+				ret = decTcp->innerMsg;
+				decTcp->cbPackReset(decTcp);
+			}
+		}
+	} else {
+		ret = s_arrDecRead[decType](run, pWaitReadable, pReadableUsed);
+	}
+	return ret;
+}
 int netapi_tcp_read(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt, struct read_arg* arg)
 {
 	struct socket_ctx* ctx = sock_valid_ctx(pipes->sockMgr, sockIdx, sockCnt);
@@ -125,66 +173,21 @@ int netapi_tcp_read(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt, stru
 	run->udRead = arg->ud;
 	int waitReadable = -1;
 	int readableUsed = 0;
-	int ret = 0;
-	if(ctx->hasProtocol){
-		waitReadable = 1;
-		//
-		readableUsed = run->readable.load(std::memory_order_acquire);
-		int readable = readableUsed;
-		struct tcp_decode* decTcp = run->tcpDec;
-		if (decTcp->state == TCPDEC_STATE_PACK_HEAD) {
-			int headRet = sockprotocol_pack_head(run, readable, decTcp);
-			if (headRet > 0) {   // parse pack-head error
-				sock_read_unlock(ctx);
-				// do close
-				return -1;
-			}
-			if (headRet == 0) {   // parse packhead done, sync decode&readbuf
-				run->curReadBuf->size4Decode = run->curReadBuf->size4Read;
-				run->curDecodeBuf = run->curReadBuf;
-				/*
-				if (decTcp->state == TCPDEC_STATE_CLOSE) {  // do close
-					sock_read_unlock(ctx);
-					// do close
-					return -1;
-				}*/
-			}
-		}
-		if (decTcp->state == TCPDEC_STATE_PACK_DEC_BODY && run->protocolNeedDecode) {
-			int bodyRet = sockprotocol_pack_dec_body(run, run->readable4Dec.load(std::memory_order_relaxed), decTcp);
-			if (bodyRet > 0) {   // parse body error
-				sock_read_unlock(ctx);
-				// do close
-				return -1;
-			}
-			if (bodyRet == 0) {   // parse body done(succ)
-				//readWaitTrig = true;
-			}
-		}
-		if(decTcp->state == TCPDEC_STATE_PACK_READ_BODY){
-			ret = sockprotocol_pack_read_body(run, decTcp);
-			assert(ret);  // ensure succ
-		}
-		if(!ret){   // has not read msg
-			if (decTcp->state == TCPDEC_STATE_INNER_MSG) {  // got inner msg
-				ret = decTcp->innerMsg;
-				decTcp->cbPackReset(decTcp);
-			}
-		}
-	}else{
-		ret = s_arrDecRead[decType](run, &waitReadable, &readableUsed);
-	}
-	if (ret) {   // read done
+	// >0:read succ  0: read not done  <0: read error(need close)
+	int ret = do_read(run, ctx->hasProtocol, decType, &waitReadable, &readableUsed);
+	if (ret > 0) {   // read succ
 		run->onReadWait = false;
 	} else {   // readWait
-		if (run->sockClosed) {   // read sock closed, do last read
+		if (run->sockClosed || ret < 0) {   // read sock closed || read error(need close)
 			run->onReadWait = false;
-			/*
-			if(!ctx->hasProtocol){
-				if (decType != DECTYPE_NOW) {   // read all left
-					ret = s_arrDecRead[DECTYPE_NOW](run, &waitReadable, &readableUsed, trunc);
-				}
-			}*/
+			if(ret == 0 && run->readable.load(std::memory_order_relaxed) > readableUsed){  // more data recved after above read, try read again
+				// >0:read succ  0: read not done  <0: read error(need close)
+				ret = do_read(run, ctx->hasProtocol, decType, &waitReadable, &readableUsed);
+			}
+			if (ret < 0) {  // read error, call close
+				netapi_close_sock(pipes, sockIdx, sockCnt);
+			}
+			//
 			run->sockCnt = ctx->cnt4Net + 1;        // incr sockCnt to forbid follow read()
 			// tell net read() over
 			bool hasSendReadOver = run->hasSendReadOver;
@@ -193,12 +196,9 @@ int netapi_tcp_read(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt, stru
 			if (!hasSendReadOver) {
 				send_read_over(net_get(pipes, ctx->idxNet), sockIdx, sockCnt, arg);
 			}
-			/*
-			if (ret) {   // read sth
-				return 2;    // means last read
-			} else {  // no data has read
-				return -1;     // means sock closed
-			}*/
+			if(ret > 0){  // final read succ
+				return ret;
+			}
 			return -1;
 		} else {    //  not read anything, send readWait req to net
 			struct tcp_read_wait wait;

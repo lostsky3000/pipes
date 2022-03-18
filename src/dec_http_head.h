@@ -11,13 +11,11 @@
 #define DECHH_STATE_HEADER 3
 #define DECHH_STATE_DONE 4
 #define DECHH_STATE_ERROR -1
-
 //
 #define DECHH_ERR_METHOD_INVALID 1
 #define DECHH_ERR_URL_INVALID 2
 #define DECHH_ERR_VER_INVALID 3
 #define DECHH_ERR_HEADER_INVALID 4
-
 //
 #define DECHH_URL_LEN_MAX 1024
 #define DECHH_HEADER_LEN_MAX 2048
@@ -25,16 +23,23 @@
 static const char* DECHH_VER = "HTTP/1.1";
 static const int DECHH_VER_LEN = 8;
 
+//
+static const char* DECHH_METHOD[2] = { "GET", "POST" };
+static const int DECHH_METHOD_LEN[2] = { 3, 4 };
+#define DECHH_METHOD_GET 0
+#define DECHH_METHOD_POST 1
+//
+
 struct dec_http_head
 {
 	int8_t state;
 	int8_t errCode;
-	//
 	int8_t headState;   // 0:reading key  1: reading val  2: checking header end
 	int8_t methodPtrnLen;
+	int16_t method;
 	//
+	uint16_t urlLen;
 	int fieldLenCnt;
-	int urlLen;
 	//
 	int widxBuf;
 	int szBuf;
@@ -45,7 +50,7 @@ struct dec_http_head
 	int headLenCnt;
 	//
 	char* methodPtrn;
-	char method[8];
+	char methodStr[8];
 };
 
 inline void dechh_reset(struct dec_http_head* d)
@@ -76,14 +81,24 @@ inline struct dec_http_head* dechh_new()
 	return d;
 }
 
+/*
 inline const char* dechh_method(struct dec_http_head* d, int* len)
 {
 	if(d->state == DECHH_STATE_DONE){
 		*len = d->methodPtrnLen;
-		return d->method;
+		return d->methodStr;
 	}
 	return nullptr;
+}*/
+inline int dechh_method(struct dec_http_head* d)
+{
+	if (d->state == DECHH_STATE_DONE) {
+		return d->method;
+	}
+	return -1;
 }
+
+
 inline const char* dechh_ver(struct dec_http_head* d, int* len)
 {
 	if(d->state == DECHH_STATE_DONE){

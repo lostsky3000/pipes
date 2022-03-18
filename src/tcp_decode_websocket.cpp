@@ -83,6 +83,11 @@ int decws_conn_check(struct tcp_decode*dec, char* buf, int bufSize, int& readByt
 	struct dec_http_head* decHead = d->decHttpHead;
 	int ret = dechh_tick(decHead, buf, bufSize, readBytes);
 	if (ret == 0) {  // http header check done, check ws info
+		if(dechh_method(decHead) != DECHH_METHOD_GET){   // method is not GET
+			decState = TCPDEC_STATE_CONN_DONE;
+			dec->errCode = 400;  // means response status code(bad request)
+			return dec->errCode;
+		}
 		dechh_headerit_init(decHead);
 		char* key = nullptr;
 		char* val = nullptr;
@@ -177,16 +182,19 @@ int decws_conn_check(struct tcp_decode*dec, char* buf, int bufSize, int& readByt
 	return -1;
 }
 
+
+// =======================begin, do not modify !!!
 static const char* RSP_LINE_SUCC = 
 "HTTP/1.1 101 Switching Protocols\r\nServer: pipes\r\nConnection: upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ";
 static const int RSP_LINE_SUCC_LEN = 112;
 static const char* RSP_LINE_403 =
 "HTTP/1.1 403 Forbidden\r\n\r\n";
 static const int RSP_LINE_403_LEN = 26;
-
 static const char* RSP_LINE_400 = 
 "HTTP/1.1 400 Bad Request\r\n\r\n";
 static const int RSP_LINE_400_LEN = 28;
+// =======================end, do not modify !!!
+
 
 int decws_conn_rsp(struct tcp_decode*dec, void* ud, FN_DECODE_RSP_IMPL impl)
 {
@@ -292,13 +300,6 @@ int decws_pack_head(struct tcp_decode*dec, uint8_t* buf, int bufSize, int& check
 				}else {  // control frame, close, pong etc..
 					state = TCPDEC_STATE_INNER_MSG;
 					dec->innerMsg = d->curOpCode;
-					/*
-					if(d->curOpCode == 8){   // close
-						//state = TCPDEC_STATE_CLOSE;
-					}else{
-						decws_pack_reset(dec);
-					}
-					*/
 				}
 				checkedBytes += seek;
 				return 0;

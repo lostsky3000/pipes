@@ -1,9 +1,5 @@
 #include "dec_http_head.h"
 
-static const char* DECHH_METHOD[2] = { "GET", "POST" };
-static const int DECHH_METHOD_LEN[2] = {3, 4};
-
-
 static const char* DECHH_VER_LINE = "HTTP/1.1\r\n";
 static const int DECHH_VER_LINE_LEN = 10;
 
@@ -62,7 +58,7 @@ int dechh_tick(struct dec_http_head*d, const char* buf, int bufSize, int& readBy
 						return on_error(d, DECHH_ERR_METHOD_INVALID);
 					}
 					if (ch == d->methodPtrn[fieldLenCnt]) {
-						d->method[fieldLenCnt] = ch;
+						d->methodStr[fieldLenCnt] = ch;
 					} else {
 						readBytes += seek;
 						return on_error(d, DECHH_ERR_METHOD_INVALID);
@@ -84,6 +80,7 @@ int dechh_tick(struct dec_http_head*d, const char* buf, int bufSize, int& readBy
 					if (ch == ptrn[0]) {  // 1st ch match
 						d->methodPtrn = (char*)ptrn;
 						d->methodPtrnLen = DECHH_METHOD_LEN[i];
+						d->method = (int16_t)i;
 						break;
 					}
 				}
@@ -91,7 +88,7 @@ int dechh_tick(struct dec_http_head*d, const char* buf, int bufSize, int& readBy
 					readBytes += seek;
 					return on_error(d, DECHH_ERR_METHOD_INVALID);
 				}
-				d->method[fieldLenCnt++] = ch;
+				d->methodStr[fieldLenCnt++] = ch;
 			}
 		}
 	}

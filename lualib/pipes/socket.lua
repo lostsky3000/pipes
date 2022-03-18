@@ -16,6 +16,8 @@ if not _cs.hasnet() then   -- net not available
 	return nil
 end
 _cs.init()
+local _cSend = _cs.send
+local _cRead = _cs.read
 
 --
 local s = {}
@@ -118,7 +120,7 @@ end
 
 local function _read(id,dec,...)
 	local ss = _genCallId()
-	local data,sz = _cs.read(id._i,id._c,ss,dec,...)
+	local data,sz = _cRead(id._i,id._c,ss,dec,...)
 	if data then  -- read succ
 		return data,sz
 	end
@@ -135,6 +137,8 @@ local function _read(id,dec,...)
 	end
 	error('invalid read: '..sz)
 end
+s._innerRead = _read
+
 function s.read(id)
 	return _read(id,0)
 end
@@ -151,7 +155,7 @@ function s.readline(id,sep,max)
 	return _read(id,2,sep,max)
 end
 function s.send(id,data,sz)
-	local ret = _cs.send(id._i,id._c,data,sz);
+	local ret = _cSend(id._i,id._c,data,sz);
 	if ret > 0 then
 		return true
 	end
@@ -159,28 +163,6 @@ function s.send(id,data,sz)
 		return false
 	end
 	error('invalid send: '..ret)
-end
-
-
-function s.wssend(id,data,sz)
-	local ret = _cs.send(id._i,id._c,data,sz,1);
-	if ret > 0 then
-		return true
-	end
-	if ret == 0 then
-		return false
-	end
-	error('invalid wssend: '..ret)
-end
-function s.wsping(id)
-	local ret = _cs.send(id._i,id._c,data,sz,3);
-	if ret > 0 then
-		return true
-	end
-	if ret == 0 then
-		return false
-	end
-	error('invalid wsping: '..ret)
 end
 
 

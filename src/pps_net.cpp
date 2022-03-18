@@ -164,7 +164,8 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 				if(read != READ_RET_AGAIN) {  // close or halfClose
 					rdSockClosed = true;
 					sock_read_atom_release(ctx);        // make sockClosed visible for svc read
-					if(read == READ_RET_HALF_CLOSE && ctx->pollOutReg) {  // half close & has unsend data 
+					//if(read == READ_RET_HALF_CLOSE && ctx->pollOutReg) {  // half close & has unsend data 
+					if (read == READ_RET_HALF_CLOSE){
 						if(ctx->pollInReg) { // unReg pollIn
 							ctx->pollInReg = false;
 							poll_evt_mod(net->pollFd, sock);

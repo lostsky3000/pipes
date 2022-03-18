@@ -1302,7 +1302,7 @@ void test_portal_start()
 	n = dechh_tick(decHttp, strHead2, strlen(strHead2), readBytes);
 	n = dechh_tick(decHttp, strHead3, strlen(strHead3), readBytes);
 
-	const char* method = dechh_method(decHttp, &n);
+	int method = dechh_method(decHttp);
 	const char* url = dechh_url(decHttp, &n);
 	const char* ver = dechh_ver(decHttp, &n);
 
