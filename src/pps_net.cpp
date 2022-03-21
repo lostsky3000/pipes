@@ -210,20 +210,15 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 			if(hasReadWait){   // has readWait check
 				if (decTcp->state == TCPDEC_STATE_PACK_HEAD) {
 					int headRet = sockprotocol_pack_head(run, readable, decTcp);
-					if (headRet > 0) {   // parse pack-head error
-						sock_read_atom_release(ctx);
-						// do close
-						return 0;
-					}
 					if (headRet == 0) {   // parse packhead done, sync decode&readbuf
 						run->curReadBuf->size4Decode = run->curReadBuf->size4Read;
 						run->curDecodeBuf = run->curReadBuf;
-						/*
-						if(decTcp->state == TCPDEC_STATE_CLOSE){  // do close
-							sock_read_atom_release(ctx);
-							// do close
-							return 0;
-						}*/
+					}else if (headRet > 0) {   // parse pack-head error
+						// mark close
+						rdSockClosed = true;
+						ctx->pollInReg = false;
+						ctx->pollOutReg = false;
+						sock_poll_del_fd(net->pollFd, sock);         // remove events reg
 					}
 				}
 				if(decTcp->state == TCPDEC_STATE_INNER_MSG){   // got inner msg
@@ -231,13 +226,14 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 				}
 				if (decTcp->state == TCPDEC_STATE_PACK_DEC_BODY && run->protocolNeedDecode) {
 					int bodyRet = sockprotocol_pack_dec_body(run, readable4Dec, decTcp);
-					if (bodyRet > 0) {   // parse body error
-						sock_read_atom_release(ctx);
-						// do close
-						return 0;
-					}
 					if (bodyRet == 0) {   // parse body done(succ)
 						readWaitTrig = true;
+					}else if (bodyRet > 0) {   // parse body error
+						// mark close
+						rdSockClosed = true;
+						ctx->pollInReg = false;
+						ctx->pollOutReg = false;
+						sock_poll_del_fd(net->pollFd, sock);         // remove events reg
 					}
 				}
 				sock_read_atom_release(ctx);
@@ -249,8 +245,12 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 					if (sockdec_sep_seek(dec, readable)) {
 						readWaitTrig = true;
 					}else{   //check if packbuf is too long
-						if(readable >= run->readPackMax){   // pack too long, close
-							// do close ...
+						if(readable >= run->readPackMax){   // pack too long
+							// mark close
+							rdSockClosed = true;
+							ctx->pollInReg = false;
+							ctx->pollOutReg = false;
+							sock_poll_del_fd(net->pollFd, sock);         // remove events reg
 						}
 					}
 					sock_read_atom_release(ctx);
@@ -262,7 +262,7 @@ static int on_tcp_read(struct pps_net* net, struct socket_sockctx* sock)
 			}
 		}
 		// check pause read
-		if(readable >= ctx->recvBufLen && (!hasReadWait || readWaitTrig)){
+		if(readable >= ctx->recvBufLen && (!hasReadWait || readWaitTrig) && !rdSockClosed){
 			ctx->pollInReg = false;
 			poll_evt_mod(net->pollFd, sock);
 			printf("on_tcp_read(), readBuf is full, remove pollIn\n");         // debug

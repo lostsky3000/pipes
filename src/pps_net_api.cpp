@@ -87,26 +87,22 @@ static int do_read(struct read_runtime* run, bool hasProtocol, int decType, int*
 		struct tcp_decode* decTcp = run->tcpDec;
 		if (decTcp->state == TCPDEC_STATE_PACK_HEAD) {
 			int headRet = sockprotocol_pack_head(run, readable, decTcp);
-			if (headRet > 0) {   // parse pack-head error
-				//sock_read_unlock(ctx);
-				// do close
-				return -1;
-			}
 			if (headRet == 0) {   // parse packhead done, sync decode&readbuf
 				run->curReadBuf->size4Decode = run->curReadBuf->size4Read;
 				run->curDecodeBuf = run->curReadBuf;
+			}else if (headRet > 0) {   // parse pack-head error
+				return -1;
 			}
 		}
 		if (decTcp->state == TCPDEC_STATE_PACK_DEC_BODY && run->protocolNeedDecode) {
 			int bodyRet = sockprotocol_pack_dec_body(run, run->readable4Dec.load(std::memory_order_relaxed), decTcp);
 			if (bodyRet > 0) {   // parse body error
-				//sock_read_unlock(ctx);
-				// do close
 				return -1;
 			}
+			/*
 			if (bodyRet == 0) {   // parse body done(succ)
 				
-			}
+			}*/
 		}
 		if (decTcp->state == TCPDEC_STATE_PACK_READ_BODY) {
 			ret = sockprotocol_pack_read_body(run, decTcp);

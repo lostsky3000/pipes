@@ -280,8 +280,12 @@ static void pack_one(struct pack_data* pack, lua_State* L, int idx, int depth)
 			break;
 		}
 	default: {
-			pack_free(pack);
-			luaL_error(L, "pack error, unsupport type: %s", lua_typename(L, type));
+			//weak check
+			write_nil(pack);
+			
+			// strong check
+			//pack_free(pack);
+			//luaL_error(L, "pack error, unsupport type: %s", lua_typename(L, type));
 			break;
 		}
 	}

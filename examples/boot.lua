@@ -37,10 +37,10 @@ pps.log('yield done')
 --pps.newservice('sock_test2')
 
 
---[[ listen test 
+--[[ listen test --]]
 local port = 10086
 log.info('prepare to listen at ',port)
---]]
+
 
 --[[
 local id,err = sock.listen(port, 
@@ -59,7 +59,10 @@ function(id,idListen)
 end)
 ]]
 
---[[
+
+--[[  
+print("maxInt: ",math.maxinteger)
+
 local ws = require('pipes.net.websocket')
 local id,err = ws.server(port,
 {uri='test'
@@ -72,9 +75,8 @@ function(id,idListen)
 	--pps.sleep(2000)
 	--pps.log('prepare to close sock')
 	--sock.close(id)
-	local idSvc = pps.newservice('ws_test1',id,idListen)
+	local idSvc = pps.newservice('ws_test2',id,idListen)
 end)
-
 if id then
 	log.info('listen succ')
 else
@@ -82,6 +84,8 @@ else
 end
 ]]
 
+
+--[[ ]]
 local redis = require('pipes.db.redis')
 local rds = redis.new()
 print('rds: ',rds)
@@ -90,6 +94,8 @@ rds:connect({
 	port=25002,
 	auth='dy0{t%@JFr!^Y]i'
 })
+
+
 
 --[[
 pps.log('sock test: ', sock.test())

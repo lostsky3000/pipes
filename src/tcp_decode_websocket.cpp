@@ -249,7 +249,7 @@ int decws_pack_head(struct tcp_decode*dec, uint8_t* buf, int bufSize, int& check
 	checkedBytes = 0;
 	int8_t& state = dec->state;
 	if(state != TCPDEC_STATE_PACK_HEAD){
-		return on_error(dec, TCPDEC_STATE_PACK_ERROR);
+		return on_error(dec, 1);
 	}
 	struct tcp_decode_websocket* d = (struct tcp_decode_websocket*)dec;
 	uint8_t& metaRcvd = d->packMetaRcvd;
@@ -268,7 +268,7 @@ int decws_pack_head(struct tcp_decode*dec, uint8_t* buf, int bufSize, int& check
 				++metaRcvd;
 			} else if (len > 126) {  // invalid
 				checkedBytes += seek;
-				return on_error(dec, TCPDEC_STATE_PACK_ERROR);
+				return on_error(dec, 2);
 			}
 		} else if (metaRcvd > 1 && metaRcvd < 10) {   // reading len
 			if (IS_BIGENDIAN) {
@@ -282,7 +282,7 @@ int decws_pack_head(struct tcp_decode*dec, uint8_t* buf, int bufSize, int& check
 			if (++metaRcvd == 14) {   // read pack-head done
 				if (!(bufMeta[1] >> 7)) {  // no mask from client, error
 					checkedBytes += seek;
-					return on_error(dec, TCPDEC_STATE_PACK_ERROR);
+					return on_error(dec, 3);
 				}
 				d->curOpCode = bufMeta[0] & MASK_OPCODE;
 				if(d->curOpCode == 1 || d->curOpCode == 2){  // has payload data

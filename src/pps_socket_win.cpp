@@ -40,7 +40,7 @@ int sock_poll(struct pps_net* net, int delay)
 			if(sock->main->pollOutReg){  // reg pollOut
 				FD_SET(sock->fd, sendSet);
 			}
-			if(sock->type == SOCKCTX_TYPE_TCP_CONN_WAIT){
+			if (sock->type == SOCKCTX_TYPE_TCP_CONN_WAIT) {
 				FD_SET(sock->fd, exceptSet);
 			}
 			if(--sockNumCnt < 1){
@@ -76,7 +76,7 @@ int sock_poll(struct pps_net* net, int delay)
 		}
 		struct socket_ctx* sockMain = sock->main;
 		if (sock->type == SOCKCTX_TYPE_TCP_CHANNEL) {
-			if (sockMain->pollInReg && FD_ISSET(sock->fd, readSet)) {
+			if (sockMain->pollInReg && (FD_ISSET(sock->fd, readSet) || FD_ISSET(sock->fd, exceptSet))) {
 				net->cbTcpRead(net, sock);
 			}
 			if (sockMain->pollOutReg && FD_ISSET(sock->fd, sendSet)) {

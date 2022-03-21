@@ -187,6 +187,9 @@ static void on_net_msg(struct net_msg*m, void* adapter, struct pps_service* s, s
 			else {
 				 // call error
 			    const char* err = lua_tostring(L, 1);
+				if(err){   
+					printf("lua_on_net_msg error: %s\n", err);   // debug
+				}
 				lua_pop(L, 1);      // pop the err
 			}
 		}

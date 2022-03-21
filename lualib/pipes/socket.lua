@@ -1,5 +1,6 @@
 
 local pps = require('pipes')
+local _queue = require('pps_queue')
 local _logger = require('pipes.logger')
 local _logE = _logger.error
 if not LPPS_C_LIB then
@@ -36,11 +37,11 @@ local function _coResumeKey(key,...)
 end
 
 --
-local _maxCallId = math.maxinteger - 1
+local _maxCallId = LPPS_MAX_INT - 1
 local _callIdCnt = 1
 local function _genCallId()
 	local callId = _callIdCnt
-	local loopCnt = math.maxinteger
+	local loopCnt = LPPS_MAX_INT
 	while (true)
 	do
 		if _callIdCnt >= _maxCallId then
@@ -118,13 +119,28 @@ function s.close(id)
 	_cs.close(idx,cnt)
 end
 
+local _tbRdWait = {}
 local function _read(id,dec,...)
 	local ss = _genCallId()
+	--
+	if id._rdwt then  -- has readWait task
+		local qRead = id._qrd
+		if not qRead or not qRead.push then
+			qRead = _queue.new()
+			id._qrd = qRead
+		end
+		local t = {ss=ss,dec=dec,arg=table.pack(...)}
+		qRead.push(t)
+		return _coYield('r'..ss, true)
+	end
+	--
 	local data,sz = _cRead(id._i,id._c,ss,dec,...)
 	if data then  -- read succ
 		return data,sz
 	end
 	if sz == 0 then  -- read wait
+		id._rdwt = true
+		_tbRdWait[ss] = id
 		return _coYield('r'..ss, true)
 	elseif sz == -1 then   -- sock has gone
 		return false
@@ -178,19 +194,55 @@ function(cmd,ss,...)
 		-- cmd,data,ss,sz
 		local tb = {...}
 		local ok,err
+		local s = tb[1]
+		local id = _tbRdWait[s]
+		_tbRdWait[s] = nil
+		local qRead = id._qrd
+		if not qRead or qRead.size() < 1 then  -- no readTask in queue
+			id._rdwt = nil
+		end
 		if ss then  -- read succ
-			ok,err = _coResumeKey('r'..tb[1], ss, tb[2])
+			ok,err = _coResumeKey('r'..s, ss, tb[2])
 		else  -- 
 			local sz = tb[2]
 			if sz and sz > 0 then  -- inner msg
-				ok,err = _coResumeKey('r'..tb[1], false, sz)
+				ok,err = _coResumeKey('r'..s, false, sz)
 			else  -- conn has gone,or error
-				ok,err = _coResumeKey('r'..tb[1], false)
+				id._rdwt = nil
+				ok,err = _coResumeKey('r'..s, false)
+				if not ok then
+					pps._procError(err)
+				end
+				return
 			end
 		end
 		if not ok then
 			pps._procError(err)
 		end
+		-- check readQueue
+		if id._qrd then
+			ok = true
+			while(id._qrd.size() > 0)
+			do
+				local t = id._qrd.pop()
+				s = t.ss
+				local data,sz = _cRead(id._i,id._c,s,t.dec,table.unpack(t.arg))
+				if data then  -- read succ
+					ok,err = _coResumeKey('r'..s, data, sz)
+				elseif sz == 0 then  -- read wait
+					_tbRdWait[s] = id
+					return 
+				elseif sz == -1 then -- sock has gone
+					ok,err = _coResumeKey('r'..s, false)
+				elseif sz > 0 then -- protocol inner msg
+					ok,err = _coResumeKey('r'..s, false, sz)
+				end
+				if not ok then
+					pps._procError(err)
+				end
+			end
+		end
+		id._rdwt = nil
 	elseif cmd == 2 then   -- tcp conn in: ss=idxParent
 		local tb = {...}   -- cntParent,idxSock,cntSock
 		local pidx = ss

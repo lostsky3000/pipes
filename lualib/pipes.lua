@@ -5,6 +5,8 @@ if not LPPS_C_LIB then
 end
 local _c = LPPS_C_LIB
 
+LPPS_MAX_INT = 2100000000
+
 --print('pipesc: ', _c)
 
 local logger = require('pipes.logger')
@@ -95,7 +97,7 @@ local function _coResume(co,...)
 	return ok,err
 end
 
-local _coMaxCnt = math.maxinteger - 1
+local _coMaxCnt = LPPS_MAX_INT - 1
 local function _execArgs(fn1,ud1,args1)
 	local co
 	local coInfo
@@ -197,7 +199,7 @@ function pps.send(to,...)
 	return _sendLua(to,0,...)
 end
 --
-local _maxCallId = math.maxinteger - 1
+local _maxCallId = LPPS_MAX_INT - 1
 local _callIdCnt = 1
 local _callRetUpks = {}
 local function _callLua(to,upk,...)
@@ -214,7 +216,7 @@ local function _callLua(to,upk,...)
 	if not ok then
 		return false, 'service not exist'
 	end
-	local loopCnt = math.maxinteger
+	local loopCnt = LPPS_MAX_INT
 	while (true)
 	do
 		if _callIdCnt >= _maxCallId then
@@ -252,11 +254,11 @@ end
 -- time fn begin
 local _scheds = {}
 local _tmouts = {}
-local _maxTmId = math.maxinteger - 1
+local _maxTmId = LPPS_MAX_INT - 1
 local _tmIdCnt = 1
 local function _genTmId()
 	local tmId = _tmIdCnt
-	local loopCnt = math.maxinteger
+	local loopCnt = LPPS_MAX_INT
 	while (true)
 	do
 		if _tmIdCnt >= _maxTmId then
