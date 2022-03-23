@@ -393,14 +393,6 @@ static int l_send(lua_State* L)
 	const char * data = lua_tolstring(L, 3, &sz); // luaL_checklstring(L, 3, &sz);
 	int isNum = 0;
 	int szReq = lua_tointegerx(L, 4, &isNum);
-	/*
-	if (isNum) {
-		if (szReq > sz) {
-			return luaL_error(L, "socket.send reqSize(%d) > realSize(%d)", szReq, sz);
-		}
-		sz = szReq;
-	}
-	*/
 	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
 	int ret = 0;
 	// check encode type
@@ -441,7 +433,75 @@ static int l_send(lua_State* L)
 		}
 		ret = netapi_tcp_send(lctx->svc->pipes, sockIdx, sockCnt, data, sz);
 	}
+	// 
+	lua_pushinteger(L, ret);
+	return 1;
+}
+static int l_rdssend(lua_State* L)
+{
+	int32_t sockIdx = luaL_checkinteger(L, 1);
+	uint32_t sockCnt = luaL_checkinteger(L, 2);
+	int argNum = lua_gettop(L) - 2;
+	if(argNum < 1){
+		return luaL_error(L, "rdssend error, no arg");
+	}
+	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
+	struct net_helper* nh = lctx->svc->curWorker->netHelper;
+	struct nethp_rdssend_ctx sendCtx;
+	//
+	nethp_wrap_rdssend_helper_init(nh);
+	nethp_wrap_rdssend_ctx_init(&sendCtx, argNum);
+	for (int i = 0; i < argNum; ++i) {
+		size_t sz = 0;
+		const char * data = lua_tolstring(L, 3 + i, &sz); 
+		if(!nethp_wrap_rdssend(nh, &sendCtx, data, sz)){
+			return luaL_error(L, "rdssend error, arg invalid");
+		}
+	}
 	// do send
+	int ret = netapi_tcp_send(lctx->svc->pipes, sockIdx, sockCnt, sendCtx.bufOut, sendCtx.szOut);
+	lua_pushinteger(L, ret);
+	return 1;
+}
+
+static int l_rdsbatinit(lua_State* L)
+{
+	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
+	nethp_wrap_rdssend_helper_init(lctx->svc->curWorker->netHelper);
+	return 0;
+}
+static int l_rdsbatadd(lua_State* L)
+{
+	int argNum = lua_gettop(L);
+	if (argNum < 1) {
+		return luaL_error(L, "rdsbatchadd error, no arg");
+	}
+	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
+	struct net_helper* nh = lctx->svc->curWorker->netHelper;
+	struct nethp_rdssend_ctx sendCtx;
+	nethp_wrap_rdssend_ctx_init(&sendCtx, argNum);
+	for (int i = 0; i < argNum; ++i) {
+		size_t sz = 0;
+		const char * data = lua_tolstring(L, 1 + i, &sz);
+		if (!nethp_wrap_rdssend(nh, &sendCtx, data, sz)) {
+			return luaL_error(L, "rdsbatchadd error, arg invalid");
+		}
+	}
+	return 0;
+}
+static int l_rdsbatsend(lua_State* L)
+{
+	int32_t sockIdx = luaL_checkinteger(L, 1);
+	uint32_t sockCnt = luaL_checkinteger(L, 2);
+	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
+	struct net_helper* nh = lctx->svc->curWorker->netHelper;
+	int sz = 0;
+	char* buf = nethp_rdssendbuf(nh, &sz);
+	if(buf == nullptr || sz < 1){
+		return luaL_error(L, "redis batchsend buf is null");
+	}
+	// do send
+	int ret = netapi_tcp_send(lctx->svc->pipes, sockIdx, sockCnt, buf, sz);
 	lua_pushinteger(L, ret);
 	return 1;
 }
@@ -470,8 +530,13 @@ int luapps_api_socket_openlib(lua_State* L)
 		{"close", l_close},
 		{"read", l_read},
 		{"send", l_send},
+		{"rdssend", l_rdssend},
 		{"hasnet", l_hasnet},
 		{"init", l_init},
+		//
+		{ "rdsbatinit", l_rdsbatinit },
+		{ "rdsbatadd", l_rdsbatadd },
+		{ "rdsbatsend", l_rdsbatsend },
 		//
 		{ NULL, NULL },
 	};

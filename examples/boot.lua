@@ -86,15 +86,51 @@ end
 
 
 --[[ ]]
+
+--pps.sleep(1000*1)
 local redis = require('pipes.db.redis')
 local rds = redis.new()
+
 print('rds: ',rds)
-rds:connect({
+
+local rsp,err = rds:connect({
 	host='47.103.91.7',
 	port=25002,
 	auth='dy0{t%@JFr!^Y]i'
 })
+if rsp then
+	print('connRds succ')
+	--[[]]
+	--rsp,err = rds:call('del','test1')
+	--rsp,err = rds:call('HMSET','test1','name','dada','age',25)
+	--rsp,err = rds:call('HGETALL','test1')
+	
+	--[[]]
+	rsp,err = rds:pipeline()
+				--:call('SET', 'test1', 'dada1')
+				--:call('GET', 'test1')
+				--:call('DEL', 'test1')
+				:set('test1', 'data1')
+				:get('test1')
+				:del('test1')
+				:sync()
 
+	if rsp ~= false then
+		print('callRdsSucc: ',rsp)
+		for i=1,rsp.size do
+			print('ret: ', rsp[i])
+		end
+	else
+		if rds:alive() then
+			print('callRdsErr(svrRspErr): ',err)
+		else
+			print('callRdsErr(connGone): ',err)
+		end
+	end
+	
+else
+	print('connRds failed: ',err)
+end
 
 
 --[[
