@@ -217,7 +217,7 @@ static int l_listen(lua_State* L)
 }
 static int l_connect(lua_State* L)
 {
-	// session, host, port, timeout, sendBufLen, recvBufLen
+	// session, host, port, timeout(opt), sendBufLen(opt), recvBufLen(opt), protocol(opt)
 	int argNum = lua_gettop(L);
 	if (argNum < 3) {
 		return luaL_error(L, "connect() args num invalid: %d", argNum);

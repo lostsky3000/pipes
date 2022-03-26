@@ -1,14 +1,20 @@
 
+local pps = require('pipes')
 local sock = require('pipes.socket')
 
 local _cs = LPPS_C_SOCK_LIB
 local _cSend = _cs.rdssend
 local _readLine = sock.readline
 local _readLen = sock.readlen
+local _fork = pps.fork
 --
 local _batInit = _cs.rdsbatinit
 local _batAdd = _cs.rdsbatadd
 local _batSend = _cs.rdsbatsend
+--
+local _strSub = string.sub
+local _strByte = string.byte
+
 
 local r = {}
 
@@ -26,20 +32,20 @@ end
 -- 
 local function _parseLine(str)
 	-- SimpleString, Error, Integer, BulkString
-	local ld = string.byte(str)
+	local ld = _strByte(str)
 	if not ld then -- str is empty
 		error('redis rsp invalid(1): '..(str or 'nil'))
 	end
 	if ld == 43 then  --  + simple string 
-		return 1, string.sub(str,2)
+		return 1, _strSub(str,2)
 	elseif ld == 36 then  -- $  bulk string
-		return 2, tonumber(string.sub(str,2))
+		return 2, tonumber(_strSub(str,2))
 	elseif ld == 58 then  -- :  integer
-		return 3, tonumber(string.sub(str,2))
+		return 3, tonumber(_strSub(str,2))
 	elseif ld == 42 then  --  * array
-		return 4, tonumber(string.sub(str,2))
+		return 4, tonumber(_strSub(str,2))
 	elseif ld == 45 then  --  - (minus) error 
-		return 5, string.sub(str,2)
+		return 5, _strSub(str,2)
 	end
 	error('redis rsp invalid(2): '..str)
 end
@@ -59,8 +65,12 @@ local function _parseArr(id,arr)
 				if not rsp then
 					return false, err or 'connect has gone(5)'
 				end
-				arr[i] = string.sub(rsp,1,-3)   -- exclude \r\n
+				arr[i] = _strSub(rsp,1,-3)   -- exclude \r\n
 			elseif ld == 0 then  -- empty string
+				rsp, err = _readLen(id, 2)  -- consume end \r\n
+				if not rsp then
+					return false, err or 'connect has gone(5-1)'
+				end
 				arr[i] = ''
 			else   -- nil obj
 				arr[i] = nil
@@ -115,7 +125,7 @@ function r:connect(arg)
 	self._id = id
 	-- auth
 	if auth then
-		local rsp, err = self:call('AUTH', auth)
+		local rsp, err = self:auth(auth)  --self:call('AUTH', auth)
 		if not rsp then
 			return false, err
 		end
@@ -128,6 +138,7 @@ local function _readOneRsp(id)
 	if not rsp then -- conn has gone
 		return false, err or 'connect has gone(2)', true
 	end
+	--print('willParseLine: ',rsp)
 	local tp,ld = _parseLine(rsp)
 	--print('recvRdsSvrRsp: ',tp, ld)
 	if tp == 2 then  -- bulkstring
@@ -136,8 +147,12 @@ local function _readOneRsp(id)
 			if not rsp then -- conn has gone
 				return false, err or 'connect has gone(3)', true
 			end
-			return string.sub(rsp,1,-3)  -- exclude \r\n
+			return _strSub(rsp,1,-3)  -- exclude \r\n
 		elseif ld == 0 then  -- empty string
+			rsp, err = _readLen(id, 2)  -- consume tail \r\n
+			if not rsp then -- conn has gone
+				return false, err or 'connect has gone(3-1)', true
+			end
 			return ''
 		else   -- nil obj
 			return nil
@@ -177,6 +192,9 @@ local function _call(self,cmd,...)
 			self._alive = nil
 			return false, 'connect has gone(1)'
 		end
+		if self._subs then  -- in subs, do not readRsp here
+			return ok
+		end
 		-- read rsp
 		local ret,err,disconn = _readOneRsp(id)
 		if disconn then  -- conn has gone
@@ -188,6 +206,117 @@ end
 
 function r:call(cmd,...)
 	return _call(self,cmd,...)
+end
+
+-- sub/pub
+local function _startSubsRead(rdsObj)
+	_fork(
+		function(rds)
+			local subs = rds._subs
+			local chCbs = subs.chCbs
+			local id = rds._id
+			local ret,err,disconn
+			while(true)
+			do
+				ret,err,disconn = _readOneRsp(id)
+				if ret then -- rsp will not be nil in subscribe mode
+					--print('retType: ',type(ret))
+					local a1 = ret[1]
+					if a1 then
+						local a2 = ret[2]
+						local b1,b2 = _strByte(a1)
+						if b1 == 109 or b1 == 115 or b2 == 115 then -- 109:m, 115:s, message or subscribe or psubscribe
+							chCbs[a2](a1,a2,ret[3])
+						elseif b2 == 109 then -- pmessage
+							chCbs[a2](a1,a2,ret[3],ret[4])
+						elseif b1 == 117 or b2 == 117 then -- 117:u, unsubscribe or punsubscribe
+							chCbs[a2](a1,a2,ret[3])
+							chCbs[a2] = nil  -- rm cb for this channel
+							if ret[3] == 0 then  -- subs over
+								print('quit subscribe')
+								rds._subs = nil
+								break
+							end
+						else
+							-- not channel msg(maybe pong), notify all cbs
+							for ch,cb in pairs(chCbs) do 
+								cb(a1,a2,ret[3])
+							end
+						end
+					else   -- ret is rsp of quit, always OK
+						rds._subs = nil
+					end
+				else
+					if disconn then
+						rds._alive = nil
+						rds._subs = nil
+						for ch,cb in pairs(chCbs) do
+							cb('disconn',err)
+						end
+						break
+					else  -- rdsSvr rsp error, notify all cbs
+						for ch,cb in pairs(chCbs) do
+							cb('error',err)
+						end
+					end
+				end
+			end	
+		end,
+		rdsObj)
+end
+local function _doSubscribe(isPsub,rds,cb,...)
+	if rds._ppcnt then  -- in pipeline
+		error('xsubscribe cant be called in pipeline')
+	end
+	local chs = {...}
+	if #chs < 1 then
+		error('no channel specify')
+	end
+	local ok
+	if isPsub then
+		ok = _sendCmd(rds._id,'PSUBSCRIBE',...)
+	else
+		ok = _sendCmd(rds._id,'SUBSCRIBE',...)
+	end
+	if not ok then  -- conn has gone
+		return false, 'connect not established'
+	end
+	--
+	local subs = rds._subs 
+	if not subs then  -- subs init
+		subs = {chCbs={}}
+	end
+	-- set cb of chs
+	local chCbs = subs.chCbs
+	for i,ch in ipairs(chs) do
+		if chCbs[ch] then  -- duplicate reg for this channel
+			error('duplicate xsubscribe for channel: '..ch)
+		end
+		chCbs[ch] = cb
+	end
+	if rds._subs then  -- sub has init before, just return
+		return true
+	end
+	-- subs init(fork to read)
+	rds._subs = subs
+	_startSubsRead(rds)
+	return true
+end
+
+function r:subscribe(cb,...)
+	return _doSubscribe(false,self,cb,...)
+end
+function r:unsubscribe(...)
+	return _call(self,'UNSUBSCRIBE')
+end
+function r:psubscribe(cb,...)
+	return _doSubscribe(true,self,cb,...)
+end
+function r:punsubscribe(...)
+	return _call(self,'PUNSUBSCRIBE')
+end
+function r:publish(ch,m)
+	return _call(self,'PUBLISH',ch,m)
 end
 
 -- pipeline
@@ -244,6 +373,21 @@ end
 
 -- cmd wrap begin
 -- normal cmd
+function r:auth(usr,pwd)
+	if usr and pwd then
+		return _call(self,'AUTH',usr,pwd)
+	end
+	return _call(self,'AUTH',usr)  -- only requirepass
+end
+function r:ping(m)
+	if m then
+		return _call(self,'PING',m)
+	end
+	return _call(self,'PING')
+end
+function r:quit()
+	return _call(self,'QUIT')
+end
 function r:get(k)
 	return _call(self,'GET',k)
 end
@@ -294,38 +438,32 @@ function r:llen(k)
 	return _call(self,'LLEN',k)
 end
 function r:lrange(k,start,stop)
-	return _call(self,'LRANGE',start,stop)
+	return _call(self,'LRANGE',k,start,stop)
 end
 function r:lpush(k,...)
 	return _call(self,'LPUSH',k,...)
 end
-function r:lpop(k,cnt)
-	return _call(self,'LPOP',k,cnt)
-end
-function r:rpush(k,...)
-	return _call(self,'RPUSH',k,...)
-end
 function r:rpop(k,cnt)
-	return _call(self,'RPOP',k,cnt)
-end
-function r:rpushlpop(src,dst)
-	return _call(self,'RPUSHLPOP',src,dst)
+	if cnt then
+		return _call(self,'RPOP',k,cnt)
+	end
+	return _call(self,'RPOP',k)
 end
 function r:lrem(k,cnt,ele)
 	return _call(self,'LREM',k,cnt,ele)
+end
+function r:lmove(src,dst,dirSrc,dirDst)
+	return _call(self,'LMOVE',src,dst,dirSrc,dirDst)
 end
 -- set cmd 
 function r:sadd(k,...)
 	return _call(self,'SADD',k,...)
 end
 function r:spop(k,cnt)
-	return _call(self,'SPOP',k,cnt)
-end
-function r:sdiff(...)
-	return _call(self,'SDIFF',...)
-end
-function r:sinter(...)
-	return _call(self,'SINTER',...)
+	if cnt then
+		return _call(self,'SPOP',k,cnt)
+	end
+	return _call(self,'SPOP',k)
 end
 function r:sismember(k,m)
 	return _call(self,'SISMEMBER',k,m)
@@ -333,20 +471,17 @@ end
 function r:smembers(k)
 	return _call(self,'SMEMBERS',k)
 end
-function r:smismember(k,...)
-	return _call(self,'SMISMEMBER',k,...)
-end
-function r:smove(s,d,m)
-	return _call(self,'SMOVE',s,d,m)
+function r:smove(src,dst,m)
+	return _call(self,'SMOVE',src,dst,m)
 end
 function r:srandmember(k,cnt)
-	return _call(self,'SRANDMEMBER',k,cnt)
+	if cnt then
+		return _call(self,'SRANDMEMBER',k,cnt)
+	end
+	return _call(self,'SRANDMEMBER',k)
 end
 function r:srem(k,...)
 	return _call(self,'SREM',k,...)
-end
-function r:sunion(...)
-	return _call(self,'SUNION',...)
 end
 -- hash cmd
 function r:hdel(k,...)
@@ -373,14 +508,8 @@ end
 function r:hmget(k,...)
 	return _call(self,'HMGET',k,...)
 end
-function r:hmset(k,...)
-	return _call(self,'HMSET',k,...)
-end
-function r:hrandfield(k,cnt,...)
-	return _call(self,'HRANDFIELD',k,cnt,...)
-end
-function r:hset(k,f,v)
-	return _call(self,'HSET',k,f,v)
+function r:hset(k,...)
+	return _call(self,'HSET',k,...)
 end
 function r:hsetnx(k,f,v)
 	return _call(self,'HSETNX',k,f,v)
@@ -392,7 +521,22 @@ end
 function r:zadd(k,...)
 	return _call(self,'ZADD',k,...)
 end
-
+-- script cmd
+function r:eval(s,...)
+	return _call(self,'EVAL',s,...)
+end
+function r:evalsha(s,...)
+	return _call(self,'EVALSHA',s,...)
+end
+function r:scriptload(s)
+	return _call(self,'SCRIPT LOAD',s)
+end
+function r:scriptexists(s,...)
+	return _call(self,'SCRIPT EXISTS',s,...)
+end
+function r:scriptflush()
+	return _call(self,'SCRIPT FLUSH')
+end
 
 -- cmd wrap end
 

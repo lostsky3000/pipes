@@ -13,7 +13,7 @@ log.info('boot service start', true, 123, 88.99)
 --error('boot error test')
 --local n = table.unpack(nil)
 
---local test2 = pps.newservice('test_2')
+local test2 = pps.newservice('mysql_test1')
 --local test3 = pps.newservice('test_3')
 
 --local db1 = pps.exclusive('db_test')
@@ -39,7 +39,7 @@ pps.log('yield done')
 
 --[[ listen test --]]
 local port = 10086
-log.info('prepare to listen at ',port)
+--log.info('prepare to listen at ',port)
 
 
 --[[
@@ -85,13 +85,23 @@ end
 ]]
 
 
---[[ ]]
+--[[ 
 
 --pps.sleep(1000*1)
 local redis = require('pipes.db.redis')
 local rds = redis.new()
 
 print('rds: ',rds)
+
+local function dumpRsp(rsp)
+	if type(rsp) == 'table' then
+		for i=1,rsp.size do
+			print('rsp('..i..'): ', rsp[i])
+		end
+	else
+		print('rsp: ', rsp)
+	end
+end
 
 local rsp,err = rds:connect({
 	host='47.103.91.7',
@@ -100,26 +110,39 @@ local rsp,err = rds:connect({
 })
 if rsp then
 	print('connRds succ')
-	--[[]]
 	--rsp,err = rds:call('del','test1')
 	--rsp,err = rds:call('HMSET','test1','name','dada','age',25)
 	--rsp,err = rds:call('HGETALL','test1')
-	
-	--[[]]
-	rsp,err = rds:pipeline()
+	--rsp,err = rds:pipeline()
 				--:call('SET', 'test1', 'dada1')
 				--:call('GET', 'test1')
 				--:call('DEL', 'test1')
-				:set('test1', 'data1')
-				:get('test1')
-				:del('test1')
-				:sync()
-
+				--:set('test1', 'data1')
+				--:get('test1')
+				--:del('test1')
+				--:sync()
+	
+	rsp,err = rds:subscribe(
+		function(tp,ch,data) 
+			--tp: disconn(conn gone), subscribe, unsubscribe, message, pong, error(svrRspErr)
+			print('onPubMsg: ',tp,ch,data)
+			if tp == 'message' then
+				if data == 'ping' then
+					rds:ping()
+				elseif data == 'invalid' then
+					rds:get('dddd')
+				elseif data == 'unsub' then
+					rds:unsubscribe()
+				elseif data == 'quit' then
+					rds:quit()
+				end
+			end
+		end
+		,'test_ch1')
 	if rsp ~= false then
 		print('callRdsSucc: ',rsp)
-		for i=1,rsp.size do
-			print('ret: ', rsp[i])
-		end
+		--print(rsp,ch,m)
+		dumpRsp(rsp)
 	else
 		if rds:alive() then
 			print('callRdsErr(svrRspErr): ',err)
@@ -127,11 +150,10 @@ if rsp then
 			print('callRdsErr(connGone): ',err)
 		end
 	end
-	
 else
 	print('connRds failed: ',err)
 end
-
+]]
 
 --[[
 pps.log('sock test: ', sock.test())
