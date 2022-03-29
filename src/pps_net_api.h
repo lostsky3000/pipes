@@ -22,5 +22,8 @@ int netapi_is_listen_valid(struct pipes* pipes, int32_t sockIdx, uint32_t sockCn
 
 int netapi_tcp_connect(struct netreq_src* src, struct pipes* pipes, struct tcp_connect_cfg* cfg);
 
+
+void netapi_send_read_over(struct pps_net* net, int32_t sockIdx, uint32_t sockCnt, struct read_arg* arg);
+
 #endif // !PPS_NET_API_H
 

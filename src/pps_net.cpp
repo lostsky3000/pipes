@@ -25,7 +25,14 @@ static void fn_pop_net_req(struct net_task_req* src, struct net_task_req* dst);
 static void send_readnotify_to_svc(struct pps_net* net, struct netreq_src* src, struct tcp_read_wait_ret* ret)
 {
 	net_wrap_svc_msg(net->pNetMsgOri, src, NETCMD_READ_WAIT, ret, sizeof(struct tcp_read_wait_ret));
-	net_send_to_svc(net->pNetMsgOri, net, true);
+	int sendRet = net_send_to_svc(net->pNetMsgOri, net, true);
+	if(sendRet < 0){   // svc has gone, do readOver
+		struct read_arg arg;
+		arg.srcIdx = src->idx;
+		arg.srcCnt = src->cnt;
+		arg.session = src->session;
+		netapi_send_read_over(net, ret->sockId.idx, ret->sockId.cnt, &arg);
+	}
 }
 static inline int poll_evt_add(SOCK_POLL_FD* pollFd, struct socket_sockctx* sockCtx) 
 {
@@ -866,6 +873,8 @@ static bool do_tcp_close(struct netreq_src* src, struct pps_net* net)
 			ret.sockId.idx = ctx->idx;
 			ret.sockId.cnt = ctx->cnt4Net;
 			send_readnotify_to_svc(net, &ctx->src, &ret);
+		}else{   // recycle directly
+			recycle_ctx(net, ctx);
 		}
 	} else if (ctx->type == SOCKCTX_TYPE_TCP_LISTEN) {
 		for (int i = 0; i < ctx->sockNum; ++i) {

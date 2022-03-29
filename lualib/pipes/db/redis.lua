@@ -98,7 +98,7 @@ local function _parseArr(id,arr)
 end
 
 function r.new()
-	local o = setmetatable({}, {__index=r})
+	local o = setmetatable({}, {__index=r,__gc=r.close})
 	return o
 end
 
@@ -364,10 +364,9 @@ function r:sync()
 end
 --
 function r:close()
-	local id = self._id
-	if id then
-		sock.close(id)
-		self._id = nil
+	if self._alive then
+		self._alive = nil
+		sock.close(self._id)
 	end
 end
 

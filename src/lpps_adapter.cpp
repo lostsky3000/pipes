@@ -358,6 +358,7 @@ static int on_lua_svc_start(struct lpps_svc_ctx* lctx, struct pps_service* s,
 		// set apiLib
 		lua_pushcfunction(L, luapps_api_openlib);
 		lua_setglobal(L, LPPS_OPEN_C_LIB);
+		// set sockApiLib
 		lua_pushcfunction(L, luapps_api_socket_openlib);
 		lua_setglobal(L, LPPS_OPEN_C_SOCK_LIB);
 		// load src loader

@@ -17,7 +17,7 @@ static void send_to_net(struct pps_net*netDst, T*ud, void(*fnFill)(struct net_ta
 	if (!mpsc_push_ptr_custom(netDst->queTaskReq, ud, fnFill)) {
 		while (!mpsc_push_ptr_custom(netDst->queTaskReq, ud, fnFill)) {}
 	}
-	if (netSrc == nullptr || netSrc->index != netDst->index) {
+	if (netSrc == nullptr || netSrc->index != netDst->index) {  // from other thread, need notify
 		sock_event_notify(netDst->eventFd);
 	}
 }
@@ -63,7 +63,7 @@ int netapi_tcp_listen(struct netreq_src* src, struct pipes* pipes, struct tcp_se
 
 static inline void enreq_read_wait(struct net_task_req* t, struct netreq_read_wait* req);
 static inline void enreq_read_over(struct net_task_req* t, struct netreq_read_wait* req);
-static void send_read_over(struct pps_net* net, int32_t sockIdx, uint32_t sockCnt, struct read_arg* arg)
+void netapi_send_read_over(struct pps_net* net, int32_t sockIdx, uint32_t sockCnt, struct read_arg* arg)
 {
 	struct tcp_read_wait wait;
 	wait.sockId.idx = sockIdx;
@@ -143,7 +143,7 @@ int netapi_tcp_read(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt, stru
 		run->hasSendReadOver = true;
 		sock_read_unlock(ctx);
 		if (!hasSendReadOver) {   // send read over
-			send_read_over(net_get(pipes, ctx->idxNet), sockIdx, sockCnt, arg);
+			netapi_send_read_over(net_get(pipes, ctx->idxNet), sockIdx, sockCnt, arg);
 		}
 		return -1;
 	}
@@ -190,7 +190,7 @@ int netapi_tcp_read(struct pipes* pipes, int32_t sockIdx, uint32_t sockCnt, stru
 			run->hasSendReadOver = true;
 			sock_read_unlock(ctx);
 			if (!hasSendReadOver) {
-				send_read_over(net_get(pipes, ctx->idxNet), sockIdx, sockCnt, arg);
+				netapi_send_read_over(net_get(pipes, ctx->idxNet), sockIdx, sockCnt, arg);
 			}
 			if(ret > 0){  // final read succ
 				return ret;
