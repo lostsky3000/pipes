@@ -4,6 +4,7 @@
 #include "pps_message.h"
 #include "pps_worker.h"
 #include "pps_config.h"
+#include <thread>
 
 
 static struct pps_service* alloc_service_slot(struct pps_service_mgr* mgr);
