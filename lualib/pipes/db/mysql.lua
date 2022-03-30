@@ -4,12 +4,13 @@ local CLI_PLUGIN_AUTH = 1<<19
 local CLI_PROTOCOL_41 = 512
 local CLI_SSL = 2048
 
-local sock = require('pipes.socket')
+local _sock = require('pipes.socket')
 local _c = LPPS_C_LIB
+local _enc = require("pipes.enc.encrypt")
 --
-local _send = sock.send
-local _readLen = sock.readlen
-local _read = sock.read
+local _send = _sock.send
+local _readLen = _sock.readlen
+local _read = _sock.read
 local _strUnpack = string.unpack
 local _strPack = string.pack
 local _strByte = string.byte
@@ -19,7 +20,7 @@ local _strGsub = string.gsub
 local _strRep = string.rep
 local _strFormat = string.format
 local _max = math.max
-local _sha1 = _c.crpt_sha1
+local _sha1 = _enc.sha1
 local _tbInsert = table.insert
 
 local function _getInt2(data,i)
@@ -279,7 +280,7 @@ function m:connect(arg)
 	end
 	self._maxPackSize = maxPackSize
 	--
-	local id,err = sock.connect(host, port, {timeout=tmout}) 
+	local id,err = _sock.connect(host, port, {timeout=tmout}) 
 	if not id then
 		return false,err
 	end
@@ -288,7 +289,7 @@ function m:connect(arg)
 	local ok,err = _doLogin(self,user,pwd,db)
 	if not ok and self._alive then  -- error but connAlive, close
 		self._alive = nil
-		sock.close(id)
+		_sock.close(id)
 	end
 	print('mysql server version: ',self._svrVer)
 	return ok,err
@@ -462,7 +463,7 @@ end
 function m:close()
 	if self._alive then
 		self._alive = nil
-		sock.close(self._id)
+		_sock.close(self._id)
 	end
 end
 

@@ -14,7 +14,6 @@
 #include "pps_timer.h"
 #include "pps_sysapi.h"
 #include "pps_logger.h"
-#include "util_crypt.h"
 
 #include <thread>
 #include <chrono>
@@ -360,15 +359,6 @@ static int l_sleep(lua_State* L)
 	return 0;
 }
 
-static int l_crpt_sha1(lua_State* L)
-{
-	size_t sz;
-	const char* str = luaL_checklstring(L, 1, &sz);
-	uint8_t digest[SHA1_DIGEST_SIZE];
-	ucrypt_sha1((uint8_t*)str, sz, digest);
-	lua_pushlstring(L, (const char*)digest, SHA1_DIGEST_SIZE);
-	return 1;
-}
 
 int luapps_api_openlib(lua_State* L)
 {
@@ -388,9 +378,6 @@ int luapps_api_openlib(lua_State* L)
 		{ "free", l_free },
 		{ "log", l_log },
 		{"shutdown", l_shutdown},
-		// crypt
-		{"crpt_sha1", l_crpt_sha1},
-
 		// debug
 		//{"sleep", l_sleep},
 		//

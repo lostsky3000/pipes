@@ -368,6 +368,16 @@ static int l_b64dec(lua_State* L)
 	return 2;
 }
 
+//
+static int l_sha1(lua_State* L)
+{
+	size_t sz;
+	const char* str = luaL_checklstring(L, 1, &sz);
+	uint8_t digest[SHA1_DIGEST_SIZE];
+	ucrypt_sha1((uint8_t*)str, sz, digest);
+	lua_pushlstring(L, (const char*)digest, SHA1_DIGEST_SIZE);
+	return 1;
+}
 ////
 int luapps_api_3rd_openlib(lua_State* L)
 {
@@ -379,6 +389,8 @@ int luapps_api_3rd_openlib(lua_State* L)
 		{"b64encsz", l_b64encsz},
 		{ "b64enc", l_b64enc},
 		{ "b64dec", l_b64dec },
+		//
+		{"sha1", l_sha1},
 		// debug
 		//{"sleep", l_sleep},
 		//

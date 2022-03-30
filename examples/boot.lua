@@ -13,11 +13,12 @@ log.info('boot service start', true, 123, 88.99)
 --error('boot error test')
 --local n = table.unpack(nil)
 
-------local test2 = pps.newservice('mysql_test1')
+--[[ mysql test ]]
+local test2 = pps.newservice('mysql_test1')
 
 
 
---[[  base64 test ]]
+--[[  base64 test 
 local b64 = require('pipes.enc.base64')
 local str = '1234567890'
 local strEnc, szEnc = b64.encode(str)
@@ -28,8 +29,9 @@ if str then
 else
 	print('b64Dec err: ',szEnc)
 end
+]]
 
---[[ json test
+--[[ json test 
 local function dumpTable(tb)
 	for k,v in pairs(tb) do
 		if type(v) == 'table' then

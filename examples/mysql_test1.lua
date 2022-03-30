@@ -10,8 +10,8 @@ end)
 log.info('mysql_test1 start')
 
 
-pps.timeout(3000,function()
-	--pps.exit()
+pps.timeout(5000,function()
+	pps.exit()
 end)
 
 local mysql = require('pipes.db.mysql')
