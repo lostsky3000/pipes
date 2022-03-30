@@ -250,14 +250,3 @@ int ucrypt_sha1(uint8_t* buf, size_t sz, uint8_t* digest)
 }
 
 
-/*
-#define BLOCKSIZE 64
-static inline void
-xor_key(uint8_t key[BLOCKSIZE], uint32_t xor) {
-	int i;
-	for (i = 0; i<BLOCKSIZE; i += sizeof(uint32_t)) {
-		uint32_t * k = (uint32_t *)&key[i];
-		*k ^= xor;
-	}
-}
-*/

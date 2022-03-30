@@ -16,6 +16,20 @@ log.info('boot service start', true, 123, 88.99)
 ------local test2 = pps.newservice('mysql_test1')
 
 
+
+--[[  base64 test ]]
+local b64 = require('pipes.enc.base64')
+local str = '1234567890'
+local strEnc, szEnc = b64.encode(str)
+print('b64Enc: ',strEnc, szEnc)
+str,szEnc = b64.decode(strEnc)
+if str then
+	print('b64Dec succ: ',str,szEnc)
+else
+	print('b64Dec err: ',szEnc)
+end
+
+--[[ json test
 local function dumpTable(tb)
 	for k,v in pairs(tb) do
 		if type(v) == 'table' then
@@ -26,7 +40,6 @@ local function dumpTable(tb)
 		end
 	end
 end
--- json test
 local json = require('pipes.enc.json')
 local str = '{"name":"dada", "age":25, "done":true, "fav":[{"nm":"sport"},{"nm":"tv"}]}'
 local obj = json.decode(str)
@@ -35,6 +48,8 @@ print('jsonDec: ',obj, #obj.fav)
 obj = {name='dada', age=25, fav={111,nil,222,"hehe"}}
 str = json.encode(obj)
 print(str)
+]]
+
 
 --dumpTable(obj)
 --local test3 = pps.newservice('test_3')

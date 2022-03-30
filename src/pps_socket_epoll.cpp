@@ -45,7 +45,7 @@ int sock_poll(struct pps_net* net, int delay)
 	for (int i=0; i<num; ++i) {  // it events
 		evt = &evts[i];
 		sockCtx = (struct socket_sockctx*)evt->data.ptr;
-		printf("epollEvt: %d\n", evt->events);   // debug
+		//printf("epollEvt: %d\n", evt->events);   // debug
 		if (sockCtx->type == SOCKCTX_TYPE_TCP_CHANNEL) {
 			if((evt->events & EPOLLIN) || (evt->events & EPOLLRDHUP) 
 					|| (evt->events & EPOLLHUP) || (evt->events & EPOLLERR)) {

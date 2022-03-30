@@ -1,17 +1,17 @@
 #include "pps_api_lua_3rd.h"
 #include "lpps_adapter.h"
 #include "cjson/cJSON.h"
-
+#include "util_crypt.h"
+#include "pps_service.h"
+#include "pps_malloc.h"
+#include <cstdint>
 
 #define ARRAY_FLAG "_ArR"
-
 struct seri_ctx
 {
 	cJSON* root;
 };
-
 static int seri_one(struct seri_ctx* ctx, lua_State* L, int idx, cJSON* wrap, const char* key);
-
 static int write_table(struct seri_ctx* ctx, lua_State* L, int idx, cJSON* wrap, const char* key)
 {
 	size_t arrLen = lua_rawlen(L, idx);
@@ -300,19 +300,85 @@ static int deseri(const char* str, lua_State* L)
 	cJSON_Delete(root);
 	return 1;
 }
-
 static int l_jsondec(lua_State* L)
 {
 	const char* str = luaL_checkstring(L, 1);
 	return deseri(str, L);
 }
 
+// base64
+static int l_b64encsz(lua_State* L)
+{
+	int szOri = luaL_checkinteger(L, 1);
+	lua_pushinteger(L, ucrypt_b64encode_calcsz(szOri));
+	return 1;
+}
+static int l_b64enc(lua_State* L)
+{
+	size_t sz = 0;
+	const char* bufOri = luaL_checklstring(L, 1, &sz);
+	int isNum = 0;
+	int szReq = lua_tointegerx(L, 2, &isNum);
+	if(isNum){  // specify data size
+		if(szReq > sz){
+			return luaL_error(L, "base64 encode error: sizeReq>sizeReal, %d>%d", szReq, sz);
+		}
+		sz = szReq;
+	}
+	int szOut = ucrypt_b64encode_calcsz(sz);
+	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
+	struct worker_tmp_buf* tmpBuf = &lctx->svc->curWorker->tmpBuf;
+	if(tmpBuf->cap < szOut){  // expand tmpBuf
+		pps_free(tmpBuf->buf);
+		tmpBuf->buf = (char*)pps_malloc(szOut);
+		tmpBuf->cap = szOut;
+	}
+	ucrypt_b64encode((uint8_t*)bufOri, sz, tmpBuf->buf);
+	lua_pushlstring(L, tmpBuf->buf, szOut);
+	lua_pushinteger(L, szOut);
+	return 2;
+}
+static int l_b64dec(lua_State* L)
+{
+	size_t sz = 0;
+	const char* bufOri = luaL_checklstring(L, 1, &sz);
+	int isNum = 0;
+	int szReq = lua_tointegerx(L, 2, &isNum);
+	if (isNum) {  // specify data size
+		if (szReq > sz) {
+			return luaL_error(L, "base64 decode error: sizeReq>sizeReal, %d>%d", szReq, sz);
+		}
+		sz = szReq;
+	}
+	int szOut = ucrypt_b64decode_calcsz(sz);
+	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
+	struct worker_tmp_buf* tmpBuf = &lctx->svc->curWorker->tmpBuf;
+	if (tmpBuf->cap < szOut) {  // expand tmpBuf
+		pps_free(tmpBuf->buf);
+		tmpBuf->buf = (char*)pps_malloc(szOut);
+		tmpBuf->cap = szOut;
+	}
+	if(!ucrypt_b64decode((uint8_t*)bufOri, sz, tmpBuf->buf, &szOut)){
+		lua_pushnil(L);
+		lua_pushstring(L, "invalid base64 str");
+		return 2;
+	}
+	lua_pushlstring(L, tmpBuf->buf, szOut);
+	lua_pushinteger(L, szOut);
+	return 2;
+}
+
+////
 int luapps_api_3rd_openlib(lua_State* L)
 {
 	luaL_checkversion(L);
 	luaL_Reg l[] = {
 		{ "jsondec", l_jsondec },
 		{ "jsonenc", l_jsonenc },
+		//
+		{"b64encsz", l_b64encsz},
+		{ "b64enc", l_b64enc},
+		{ "b64dec", l_b64dec },
 		// debug
 		//{"sleep", l_sleep},
 		//
