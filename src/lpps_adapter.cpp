@@ -8,6 +8,7 @@
 #include "pps_timer.h"
 #include "pps_net_api.h"
 #include "pps_api_lua_socket.h"
+#include "pps_api_lua_3rd.h"
 #include "pps_worker.h"
 
 extern "C" {
@@ -361,6 +362,9 @@ static int on_lua_svc_start(struct lpps_svc_ctx* lctx, struct pps_service* s,
 		// set sockApiLib
 		lua_pushcfunction(L, luapps_api_socket_openlib);
 		lua_setglobal(L, LPPS_OPEN_C_SOCK_LIB);
+		// set 3rdApiLib
+		lua_pushcfunction(L, luapps_api_3rd_openlib);
+		lua_setglobal(L, LPPS_OPEN_C_3RD_LIB);
 		// load src loader
 		int r = luaL_loadfile(L, "./lualib/pps_svc_loader.lua");
 		if (r != LUA_OK) {

@@ -43,8 +43,6 @@ local MTYPE_NO_RET = 10
 local MTYPE_LUA = 11
 --
 local _exit
-local _debug
-
 
 local function _pushCo(co)
 	_cosStack.push(co)
@@ -147,15 +145,9 @@ local function _execArgs(fn1,ud1,args1)
 		end)
 		coInfo.co = co
 	end
-	if _debug then
-		--print('dbg_1 coStackLen = ',_cosStack.size(), 'cosFreeLen=',_cosFree.size())  -- debug
-	end
 	local ok,err = _co.resume(co,fn1,ud1,args1)
 	if not ok then -- fn() error
 		_onForkEnd(false,ud1)
-	end
-	if _debug then
-		--print('dbg_2,ret=',ok, ', coStatus='.._co.status(co)..', coStackLen = ',_cosStack.size(), 'cosFreeLen=',_cosFree.size(),'\n')  -- debug
 	end
 	return ok,err 
 	--return _co.resume(co,fn1,ud1,args1)
@@ -357,10 +349,6 @@ function pps.wakeup(coUsr)
 		ok,err = _coResume(co,false,'BREAK')
 	end
 	return true,ok,err
-end
-
-function pps.debug()
-	_debug = true
 end
 
 --

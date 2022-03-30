@@ -1,4 +1,6 @@
 local luadir = "./3rd/lua/"
+local dir3rd = "./3rd/"
+local cjsondir = dir3rd.."cjson/"
 
 workspace "pipes"
     configurations { "Debug", "Release" }
@@ -66,8 +68,8 @@ project "pipesc"
     kind "SharedLib"
     language "C++"
     targetprefix ""
-    includedirs {luadir, "src"}
-    files {"./src/**.h", "./src/**.cpp" }
+    includedirs {luadir, dir3rd, "src"}
+    files {"./src/**.h", "./src/**.cpp", cjsondir.."*.c" }
     links{"lua54"}
     filter { "system:windows" }
         defines {"LUA_BUILD_AS_DLL"}

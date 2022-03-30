@@ -13,7 +13,30 @@ log.info('boot service start', true, 123, 88.99)
 --error('boot error test')
 --local n = table.unpack(nil)
 
-local test2 = pps.newservice('mysql_test1')
+------local test2 = pps.newservice('mysql_test1')
+
+
+local function dumpTable(tb)
+	for k,v in pairs(tb) do
+		if type(v) == 'table' then
+			print(k..':')
+			dumpTable(v)
+		else
+			print(k..'=',v)
+		end
+	end
+end
+-- json test
+local json = require('pipes.enc.json')
+local str = '{"name":"dada", "age":25, "done":true, "fav":[{"nm":"sport"},{"nm":"tv"}]}'
+local obj = json.decode(str)
+print('jsonDec: ',obj, #obj.fav)
+
+obj = {name='dada', age=25, fav={111,nil,222,"hehe"}}
+str = json.encode(obj)
+print(str)
+
+--dumpTable(obj)
 --local test3 = pps.newservice('test_3')
 
 --local db1 = pps.exclusive('db_test')
