@@ -1,6 +1,7 @@
 #ifndef UTIL_CRYPT_H
 #define UTIL_CRYPT_H
 
+#include <cstddef>
 #include <cstdint>
 
 #define SHA1_DIGEST_SIZE 20
