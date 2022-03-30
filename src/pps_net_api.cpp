@@ -7,6 +7,7 @@
 #include "tcp_protocol.h"
 #include "net_helper.h"
 #include "pps_worker.h"
+#include <thread>
 
 static FN_READDEC_INIT s_arrDecInit[TCP_DEC_NUM] = { sockdec_init_now, sockdec_init_len, sockdec_init_sep };
 static FN_READDEC_READ s_arrDecRead[TCP_DEC_NUM] = { sockdec_read_now, sockdec_read_len, sockdec_read_sep };
