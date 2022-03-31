@@ -23,6 +23,7 @@
 #include "pps_service.h"
 #include "pps_message.h"
 #include "mq_spsc.h"
+#include "rw_lock.h"
 
 
 static int g_flag1 = 1;
@@ -1258,12 +1259,67 @@ static void spsc_test()
 
 // spsc test end
 
+// rw_lock test begin
+struct rw_lock* g_rwLock = nullptr;
+std::set<int> g_rwLockSet;
+std::atomic<int> g_rwLockCnt = 0;
+static const int g_rwLockTotal = 100000;
+static void rwlockTestThread(int thIdx)
+{
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	bool isReadTh = thIdx % 2 == 0;
+	if(isReadTh){  // read thread
+		while(true){
+			rwlock_read_lock(g_rwLock);
+			int cur = g_rwLockCnt.load(std::memory_order_relaxed);
+			if(cur > 0){
+				if(g_rwLockSet.find(cur) == g_rwLockSet.end()){  // exception
+					int n = 1;
+				}
+			}
+			rwlock_read_unlock(g_rwLock);
+			if (cur >= g_rwLockTotal) {
+				break;
+			}
+		}
+		
+	}else{  // write thread
+		while(true){
+			rwlock_write_lock(g_rwLock);
+			int cur = g_rwLockCnt.load(std::memory_order_relaxed);
+			g_rwLockSet.insert(++cur);
+			g_rwLockCnt.fetch_add(1, std::memory_order_relaxed);
+			rwlock_write_unlock(g_rwLock);
+			if(cur >= g_rwLockTotal){
+				break;
+			}
+		}
+	}
+}
+static void rwLockTest()
+{
+	g_rwLock = rwlock_new();
+	int thNum = 4;
+
+	std::thread arrTh[256];
+	for (int i = 0; i < thNum; ++i) {
+		arrTh[i] = std::thread(rwlockTestThread, i);
+	}
+	for (int i = 0; i < thNum; ++i) {
+		arrTh[i].join();
+	}
+
+	rwlock_destroy(g_rwLock);
+}
+// rw_lock test end
+
+
 #include "tcp_decode.h"
 #include "dec_http_head.h"
 #include "util_crypt.h"
 void test_portal_start()
 {
-	return;
+	//return;
 	int n = 1;
 	struct dec_sep* dec = decsep_new();
 	const char* sep = "\n\r";
@@ -1315,6 +1371,8 @@ void test_portal_start()
 	const char* key4 = dechh_headerit_next(decHttp, &keyLen, &pVal, &valLen);
 	n = 1;
 
+	rwLockTest();
+
 	//spsc_test();
 	//std::thread th = std::thread(test_thread);	
 	//th.join();
@@ -1330,7 +1388,7 @@ void test_portal_start()
 
 	//mcsTest();
 
-	mq_test();
+	//mq_test();
 	
 	//test_thpool();
 	

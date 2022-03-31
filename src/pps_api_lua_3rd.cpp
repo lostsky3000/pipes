@@ -6,7 +6,7 @@
 #include "pps_malloc.h"
 #include <cstdint>
 
-#define ARRAY_FLAG "_ArR"
+#define ARRAY_FLAG "_PpSaRr"
 struct seri_ctx
 {
 	cJSON* root;

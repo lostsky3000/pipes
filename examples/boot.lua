@@ -13,9 +13,9 @@ log.info('boot service start', true, 123, 88.99)
 --error('boot error test')
 --local n = table.unpack(nil)
 
---[[ mysql test ]]
+--[[ mysql test
 local test2 = pps.newservice('mysql_test1')
-
+ ]]
 
 
 --[[  base64 test 
@@ -31,7 +31,7 @@ else
 end
 ]]
 
---[[ json test 
+--[[ json test  ]]
 local function dumpTable(tb)
 	for k,v in pairs(tb) do
 		if type(v) == 'table' then
@@ -50,7 +50,7 @@ print('jsonDec: ',obj, #obj.fav)
 obj = {name='dada', age=25, fav={111,nil,222,"hehe"}}
 str = json.encode(obj)
 print(str)
-]]
+
 
 
 --dumpTable(obj)
