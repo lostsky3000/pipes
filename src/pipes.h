@@ -25,7 +25,7 @@ struct pps_boot_ud
 	FN_PPS_BOOT_CB cb;
 	void* ud;
 };
-
+struct share_table_mgr;
 struct pipes
 {
 	std::atomic<bool> hasShutdown;
@@ -49,6 +49,7 @@ struct pipes
 	struct pps_service_mgr* serviceMgr;
 	struct socket_mgr* sockMgr;
 	struct pps_exclusive_mgr* exclusiveMgr;
+	struct share_table_mgr* shareTableMgr;
 	//
 	struct timer_clock_point* tmStart;
 	//

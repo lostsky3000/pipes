@@ -14,7 +14,6 @@ LUAMOD_API int luaopen_pipesc_boot(lua_State *L);
 #include <mutex>
 #include <condition_variable>
 
-
 #include "pps_worker.h"
 #include "pps_service.h"
 #include "pps_macro.h"
@@ -22,6 +21,7 @@ LUAMOD_API int luaopen_pipesc_boot(lua_State *L);
 #include "pps_timer.h"
 #include "pps_net.h"
 #include "pps_socket.h"
+#include "lpps_sharetable.h"
 
 static int pipes_init(struct pipes* pipes);
 static int pipes_run(struct pipes* pipes);
@@ -93,7 +93,6 @@ l_deinit(lua_State* L)
 			worker_deinit_main_thread(&pipes->workers[i]);
 		}
 		delete[] pipes->workers;
-		
 		// destroy sockMgr & nets
 		if(pipes->config->net_num > 0) {
 			struct socket_mgr* sockMgr = pipes->nets[0].sockMgr;
@@ -116,6 +115,9 @@ l_deinit(lua_State* L)
 		delete pipes->tmStart;
 		// destroy config
 		config_deinit(pipes->config);
+		// destroy shareTableMgr
+		sharetb_mgr_deinit(pipes->shareTableMgr);
+		delete pipes->shareTableMgr;
 		// destroy pipes
 		delete pipes;
 	}
@@ -167,6 +169,9 @@ static int pipes_init(struct pipes* pipes)
 		}
 		pipes->netAllocCnt.store(0);
 		pipes->timerAllocCnt.store(0);
+		// init shareTableMgr
+		pipes->shareTableMgr = new struct share_table_mgr;
+		sharetb_mgr_init(pipes->shareTableMgr);
 		// reg boot cb
 		pipes->ud.cb = lpps_onboot;
 		pipes->ud.ud = nullptr;
@@ -179,13 +184,13 @@ static int pipes_init(struct pipes* pipes)
 static int 
 l_run(lua_State* L) 
 {	
-	// test 
-	test_portal_start();
-	//
 	struct pipes* pipes = get_pipes(L);
 	if (pipes == NULL) {
 		return luaL_error(L, "no pipes found");
 	}
+	// test 
+	test_portal_start(pipes);
+	//
 	int ret = pipes_run(pipes);
 	if (ret) {  // run error
 		return luaL_error(L, "pipes run error: %d", ret);

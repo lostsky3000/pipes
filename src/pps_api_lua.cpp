@@ -14,6 +14,7 @@
 #include "pps_timer.h"
 #include "pps_sysapi.h"
 #include "pps_logger.h"
+#include "lpps_sharetable.h"
 
 #include <thread>
 #include <chrono>
@@ -359,6 +360,13 @@ static int l_sleep(lua_State* L)
 	return 0;
 }
 
+static int l_stb_loadfile(lua_State* L)
+{
+	const char* file = luaL_checkstring(L, 1);
+	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
+	struct pipes* pipes = lctx->svc->pipes;
+	return sharetb_loadfile(L, pipes->shareTableMgr, file, pipes->config->lua_path);
+}
 
 int luapps_api_openlib(lua_State* L)
 {
@@ -378,6 +386,9 @@ int luapps_api_openlib(lua_State* L)
 		{ "free", l_free },
 		{ "log", l_log },
 		{"shutdown", l_shutdown},
+		//
+		{"stb_loadfile", l_stb_loadfile},
+
 		// debug
 		//{"sleep", l_sleep},
 		//

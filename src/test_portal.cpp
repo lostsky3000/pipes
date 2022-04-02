@@ -1300,7 +1300,6 @@ static void rwLockTest()
 {
 	g_rwLock = rwlock_new();
 	int thNum = 4;
-
 	std::thread arrTh[256];
 	for (int i = 0; i < thNum; ++i) {
 		arrTh[i] = std::thread(rwlockTestThread, i);
@@ -1308,18 +1307,32 @@ static void rwLockTest()
 	for (int i = 0; i < thNum; ++i) {
 		arrTh[i].join();
 	}
-
 	rwlock_destroy(g_rwLock);
 }
 // rw_lock test end
 
 
+// share table test begin
+#include "lpps_sharetable.h"
+static void shareTableTest(struct pipes* pipes)
+{
+	struct share_table_mgr* mgr = new struct share_table_mgr;
+	sharetb_mgr_init(mgr);
+
+	//struct share_table* tb = sharetb_loadfile(mgr, "share_test1", pipes->config->lua_path);
+
+	sharetb_mgr_deinit(mgr);
+	delete mgr;
+}
+// share table test end
+
 #include "tcp_decode.h"
 #include "dec_http_head.h"
 #include "util_crypt.h"
-void test_portal_start()
+
+void test_portal_start(struct pipes* pipes)
 {
-	//return;
+	return;
 	int n = 1;
 	struct dec_sep* dec = decsep_new();
 	const char* sep = "\n\r";
@@ -1371,7 +1384,9 @@ void test_portal_start()
 	const char* key4 = dechh_headerit_next(decHttp, &keyLen, &pVal, &valLen);
 	n = 1;
 
-	rwLockTest();
+	shareTableTest(pipes);
+
+	//rwLockTest();
 
 	//spsc_test();
 	//std::thread th = std::thread(test_thread);	
