@@ -363,9 +363,17 @@ static int l_sleep(lua_State* L)
 static int l_stb_loadfile(lua_State* L)
 {
 	const char* file = luaL_checkstring(L, 1);
+	const char* mode = lua_tostring(L, 2);
 	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
 	struct pipes* pipes = lctx->svc->pipes;
-	return sharetb_loadfile(L, pipes->shareTableMgr, file, pipes->config->lua_path);
+	return sharetb_loadfile(L, pipes->shareTableMgr, file, pipes->config->lua_path, mode);
+}
+static int l_stb_query(lua_State* L)
+{
+	const char* file = luaL_checkstring(L, 1);
+	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
+	struct pipes* pipes = lctx->svc->pipes;
+	return sharetb_query(L, pipes->shareTableMgr, file);
 }
 
 int luapps_api_openlib(lua_State* L)
@@ -388,7 +396,7 @@ int luapps_api_openlib(lua_State* L)
 		{"shutdown", l_shutdown},
 		//
 		{"stb_loadfile", l_stb_loadfile},
-
+		{"stb_query", l_stb_query},
 		// debug
 		//{"sleep", l_sleep},
 		//

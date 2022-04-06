@@ -325,8 +325,11 @@ static int l_b64enc(lua_State* L)
 		}
 		sz = szReq;
 	}
-	int szOut = ucrypt_b64encode_calcsz(sz);
 	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
+	if (lctx == nullptr) {
+		return luaL_error(L, "lua-service has not initialized");
+	}
+	int szOut = ucrypt_b64encode_calcsz(sz);
 	struct worker_tmp_buf* tmpBuf = &lctx->svc->curWorker->tmpBuf;
 	if(tmpBuf->cap < szOut){  // expand tmpBuf
 		pps_free(tmpBuf->buf);
@@ -350,8 +353,11 @@ static int l_b64dec(lua_State* L)
 		}
 		sz = szReq;
 	}
-	int szOut = ucrypt_b64decode_calcsz(sz);
 	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx*)lua_touserdata(L, lua_upvalueindex(1));
+	if (lctx == nullptr) {
+		return luaL_error(L, "lua-service has not initialized");
+	}
+	int szOut = ucrypt_b64decode_calcsz(sz);
 	struct worker_tmp_buf* tmpBuf = &lctx->svc->curWorker->tmpBuf;
 	if (tmpBuf->cap < szOut) {  // expand tmpBuf
 		pps_free(tmpBuf->buf);
@@ -402,7 +408,8 @@ int luapps_api_3rd_openlib(lua_State* L)
 	lua_getfield(L, LUA_REGISTRYINDEX, LPPS_SVC_CTX);
 	struct lpps_svc_ctx* lctx = (struct lpps_svc_ctx *)lua_touserdata(L, -1);
 	if (lctx == NULL) {
-		return luaL_error(L, "lua-service has not initialized");
+		// not check for sharetable use jsonParser
+		//return luaL_error(L, "lua-service has not initialized");
 	}
 	luaL_setfuncs(L, l, 1);
 

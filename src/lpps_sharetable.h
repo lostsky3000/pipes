@@ -9,7 +9,7 @@ extern "C" {
 #include "lualib.h"
 #include "lauxlib.h"
 //
-#include "ltable.h"
+
 #include "lext4pps.h"
 }
 
@@ -27,8 +27,8 @@ struct share_table_mgr
 	SHARE_MAP map;
 };
 
-int sharetb_loadfile(lua_State* L, struct share_table_mgr* mgr, const char* file, const char* luaPath);
-
+int sharetb_loadfile(lua_State* L, struct share_table_mgr* mgr, const char* file, const char* luaPath, const char* mode);
+int sharetb_query(lua_State* L, struct share_table_mgr* mgr, const char* file);
 //
 int sharetb_mgr_init(struct share_table_mgr* mgr);
 void sharetb_mgr_deinit(struct share_table_mgr* mgr);

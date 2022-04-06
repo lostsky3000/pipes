@@ -15,15 +15,40 @@ log.info('boot service start', true, 123, 88.99)
 
 --[[ share table test ]]
 local share = require('pipes.sharetable')
-local tbCfg = share.loadfile('share_table1')
+local tbCfg = share.query('share_table1')
+print('queryRet1: ',tbCfg)
 
---[[ ]]
-pps.timeout(3000,function()
+tbCfg = share.loadfile('share_table1')
+--tbCfg = share.loadfile('share_table_json1.json','json')
+
+print('tbCfgLen1: ', #tbCfg)
+print('tbCfgLen2: ', #tbCfg)
+
+--print('tbNotExist1: ', tbCfg.n1)
+--print('tbNotExist2: ', tbCfg.n1)
+
+
+for k,v in pairs(tbCfg) do
+	print('item1: ',k,v)
+end
+--[[
+for i,v in ipairs(tbCfg) do
+	print('item2: ',i,v)
+end
+]]
+
+
+--[[ 
+pps.timeout(1000,function()
 	local tbSub = tbCfg.sub1
-
 	tbSub = tbCfg.sub1
-	--pps.exit()
+	print('sub1Dump1: ',tbSub.name,tbSub.age)
+	print('sub1Dump2: ',tbSub.name,tbSub.age)
+
+	pps.sleep(1000)
+	pps.exit()
 end)
+]]
 
 
 --[[ mysql test
