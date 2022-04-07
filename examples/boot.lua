@@ -21,22 +21,29 @@ print('queryRet1: ',tbCfg)
 tbCfg = share.loadfile('share_table1')
 --tbCfg = share.loadfile('share_table_json1.json','json')
 
-print('tbCfgLen1: ', #tbCfg)
-print('tbCfgLen2: ', #tbCfg)
 
---print('tbNotExist1: ', tbCfg.n1)
---print('tbNotExist2: ', tbCfg.n1)
+
+print('tbCfgKey1: ', tbCfg.sub1.name, tbCfg.sub1.age)
+print('tbCfgKey2: ', tbCfg.sub1.name, tbCfg.sub1.age)
+
+print('tbNotExist1: ', tbCfg.n1)
+print('tbNotExist2: ', tbCfg.n1)
 
 
 for k,v in pairs(tbCfg) do
 	print('item1: ',k,v)
 end
+
 --[[
+print('tbCfgLen1: ', #tbCfg)
+print('tbCfgLen2: ', #tbCfg)
 for i,v in ipairs(tbCfg) do
-	print('item2: ',i,v)
+	print('item2-1: ',i,v)
+end
+for i,v in ipairs(tbCfg) do
+	print('item2-2: ',i,v)
 end
 ]]
-
 
 --[[ 
 pps.timeout(1000,function()

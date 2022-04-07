@@ -9,8 +9,6 @@ extern "C" {
 #include "lualib.h"
 #include "lauxlib.h"
 //
-
-#include "lext4pps.h"
 }
 
 typedef std::unordered_map<const char*, struct share_table*> SHARE_MAP;
@@ -18,7 +16,7 @@ typedef std::unordered_map<const char*, struct share_table*> SHARE_MAP;
 struct share_table
 {
 	lua_State* L;
-	Table* tbRoot;
+	void* tbRoot;
 	std::mutex mtx;
 };
 struct share_table_mgr
