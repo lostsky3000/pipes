@@ -3,6 +3,7 @@
 
 #include <unordered_map>
 #include <mutex>
+#include "pool_linked.h"
 
 extern "C" {
 #include "lua.h"
@@ -15,6 +16,7 @@ typedef std::unordered_map<const char*, struct share_table*> SHARE_MAP;
 
 struct share_table
 {
+	struct pool_linked<int>* queFreeLitIdx;
 	lua_State* L;
 	void* tbRoot;
 	std::mutex mtx;

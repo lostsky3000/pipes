@@ -22,16 +22,27 @@ tbCfg = share.loadfile('share_table1')
 --tbCfg = share.loadfile('share_table_json1.json','json')
 
 
+--print('tbCfgKey1: ', tbCfg.sub1.name, tbCfg.sub1.age)
+--print('tbCfgKey2: ', tbCfg.sub1.name, tbCfg.sub1.age)
 
-print('tbCfgKey1: ', tbCfg.sub1.name, tbCfg.sub1.age)
-print('tbCfgKey2: ', tbCfg.sub1.name, tbCfg.sub1.age)
+--print('tbNotExist1: ', tbCfg.n1)
+--print('tbNotExist2: ', tbCfg.n1)
 
-print('tbNotExist1: ', tbCfg.n1)
-print('tbNotExist2: ', tbCfg.n1)
-
-
+local cnt = 1
 for k,v in pairs(tbCfg) do
-	print('item1: ',k,v)
+	print('item1-1: ',k,v)
+	cnt = cnt + 1
+	if cnt > 1 then
+		break
+	end	
+end
+cnt = 1
+for k,v in pairs(tbCfg) do
+	print('item1-2: ',k,v)
+	cnt = cnt + 1
+	if cnt > 3 then
+		break
+	end	
 end
 
 --[[
@@ -45,17 +56,11 @@ for i,v in ipairs(tbCfg) do
 end
 ]]
 
---[[ 
-pps.timeout(1000,function()
-	local tbSub = tbCfg.sub1
-	tbSub = tbCfg.sub1
-	print('sub1Dump1: ',tbSub.name,tbSub.age)
-	print('sub1Dump2: ',tbSub.name,tbSub.age)
-
-	pps.sleep(1000)
+--[[ ]]
+pps.timeout(2000,function()
 	pps.exit()
 end)
-]]
+
 
 
 --[[ mysql test

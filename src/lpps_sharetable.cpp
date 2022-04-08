@@ -3,24 +3,32 @@
 #include "lpps_adapter.h"
 #include "pps_api_lua.h"
 
+
 #define METATABLE_NAME "LpPs_ShArE_mEtA"
 
 struct table_ctx
 {
-	int len;
-	int itAllDone;
-	int itCnt;
+	int16_t itAllDone;
+	int16_t itNotInit;
+	int arrLen;
 	struct share_table* rootCtx;
 	void* tbOri;
 	lua_State* Lit;
+	int refLit;
 };
 
+static inline void free_Lit(struct table_ctx* ctx, struct share_table* rootCtx);
 static inline int metafn_gc(lua_State* Lproxy)
 {
 	void* ptrTbProxy = (void*)lua_topointer(Lproxy, -1);
-	lua_pushlightuserdata(Lproxy, (void*)ptrTbProxy);
-	lua_gettable(Lproxy, LUA_REGISTRYINDEX);
+	lua_pushlightuserdata(Lproxy, ptrTbProxy);
+	lua_rawget(Lproxy, LUA_REGISTRYINDEX);
 	struct table_ctx* ctx = (struct table_ctx*)lua_touserdata(Lproxy, -1);
+	if(ctx->Lit != nullptr){  // neet free Lit to Lori
+		struct share_table* rootCtx = ctx->rootCtx;
+		std::lock_guard<std::mutex> lock(rootCtx->mtx);
+		free_Lit(ctx, rootCtx);
+	}
 	printf("onProxyTable gc: %p, ctx: %p\n", ptrTbProxy, ctx);  // debug
 	lua_pop(Lproxy, 1); // pop ctx
 	delete ctx;
@@ -37,13 +45,14 @@ static int create_proxy_table(lua_State* Lproxy, void* tbOri, struct share_table
 	struct table_ctx* ctx = new struct table_ctx;
 	ctx->tbOri = tbOri;
 	ctx->rootCtx = rootCtx;
-	ctx->len = -1;
+	ctx->arrLen = -1;
 	ctx->itAllDone = 0;
 	ctx->Lit = nullptr;
-	ctx->itCnt = 0;
+	ctx->refLit = LUA_NOREF;
+	ctx->itNotInit = 1;
 	lua_pushlightuserdata(Lproxy, ptrTbProxy);
 	lua_pushlightuserdata(Lproxy, ctx);
-	lua_settable(Lproxy, LUA_REGISTRYINDEX);
+	lua_rawset(Lproxy, LUA_REGISTRYINDEX);
 	printf("newProxyTable: %p, ctx: %p\n", ptrTbProxy, ctx);  // debug
 	return 1;
 }
@@ -55,47 +64,47 @@ static int move_val(lua_State* Lto, int tp, struct share_table* rootCtx, lua_Sta
 		size_t len;
 		const char* val = lua_tolstring(Lfrom, -1, &len);
 		lua_pushlstring(Lto, val, len);
-		lua_settable(Lto, -3);
+		lua_rawset(Lto, -3);
 		lua_pushlstring(Lto, val, len);
 	} else if (tp == LUA_TNUMBER) {
 		if(lua_isinteger(Lfrom, -1)){
 			int num = lua_tointeger(Lfrom, -1);
 			lua_pushinteger(Lto, num);
-			lua_settable(Lto, -3);
+			lua_rawset(Lto, -3);
 			lua_pushinteger(Lto, num);
 		}else{
 			lua_Number num = lua_tonumber(Lfrom, -1);
 			lua_pushnumber(Lto, num);
-			lua_settable(Lto, -3);
+			lua_rawset(Lto, -3);
 			lua_pushnumber(Lto, num);
 		}
 	} else if (tp == LUA_TTABLE) {
 		void* tbOri = (void*)lua_topointer(Lfrom, -1);
 		lua_pushlightuserdata(Lfrom, tbOri);
 		lua_insert(Lfrom, -2);
-		lua_settable(Lfrom, LUA_REGISTRYINDEX);  // keep tbOri alive
+		lua_rawset(Lfrom, LUA_REGISTRYINDEX);  // keep tbOri alive
 		popLoriNum = 1;
 		//
 		create_proxy_table(Lto, tbOri, rootCtx);    // now, new tbProxy on the top
 		lua_pushvalue(Lto, -1); // copy tbProxy to top
 		lua_insert(Lto, -4);    // mv top tbProxy to -4
-		lua_settable(Lto, -3);  // set tbProxy to tbParent
+		lua_rawset(Lto, -3);  // set tbProxy to tbParent
 		lua_pop(Lto, 1);        // pop tbParent, left tbProxy on top
 	} else if (tp == LUA_TBOOLEAN) {
 		int b = lua_toboolean(Lfrom, -1);
 		lua_pushboolean(Lto, b);
-		lua_settable(Lto, -3);
+		lua_rawset(Lto, -3);
 		lua_pushboolean(Lto, b);
 	}
 	/*
 	else if (ttisnil(val)) {
 		lua_pushnil(Lto);
-		lua_settable(Lto, -3);
+		lua_rawset(Lto, -3);
 		lua_pushnil(Lto);
 	}*/ 
 	else {  // treat as nil
-		lua_pushnil(Lto);
-		lua_settable(Lto, -3);
+		//lua_pushnil(Lto);
+		//lua_rawset(Lto, -3);
 		lua_pushnil(Lto);
 	}
 	if(popLoriNum > 0){
@@ -108,12 +117,12 @@ static int metafn_len(lua_State* L)
 	void* tbCur = (void*)lua_topointer(L, 1);
 	// get ctx
 	lua_pushlightuserdata(L, tbCur);
-	lua_gettable(L, LUA_REGISTRYINDEX);
+	lua_rawget(L, LUA_REGISTRYINDEX);
 	struct table_ctx* ctx = (struct table_ctx*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
 	//
-	if(ctx->len > -1){  // has got len
-		lua_pushinteger(L, ctx->len);
+	if(ctx->arrLen > -1){  // has got len
+		lua_pushinteger(L, ctx->arrLen);
 		return 1;
 	}
 	//
@@ -124,12 +133,12 @@ static int metafn_len(lua_State* L)
 	{
 		std::lock_guard<std::mutex> lock(rootCtx->mtx);
 		lua_pushlightuserdata(Lori, tbOri);
-		lua_gettable(Lori, LUA_REGISTRYINDEX);  // make tbOri to the top
+		lua_rawget(Lori, LUA_REGISTRYINDEX);  // make tbOri to the top
 		lua_len(Lori, -1);
 		len = lua_tointeger(Lori, -1);
 		lua_pop(Lori, 2);  // pop len & table
 	}
-	ctx->len = len;
+	ctx->arrLen = len;
 	lua_pushinteger(L, len);
 	return 1;
 }
@@ -144,49 +153,127 @@ static int luaB_next(lua_State *L) {
 		return 1;
 	}
 }
+
+static inline void free_Lit(struct table_ctx* ctx, struct share_table* rootCtx)
+{
+	plk_push(rootCtx->queFreeLitIdx, ctx->refLit);
+	ctx->Lit = nullptr;
+	ctx->refLit = LUA_NOREF;
+}
+static inline void gain_Lit(struct table_ctx* ctx, struct share_table* rootCtx, lua_State* Lori)
+{
+	if(plk_pop(rootCtx->queFreeLitIdx, &ctx->refLit)){  // has free Lit
+		lua_rawgeti(Lori, LUA_REGISTRYINDEX, ctx->refLit);
+		ctx->Lit = lua_tothread(Lori, -1);
+		lua_pop(Lori, 1);
+	}else{  // no free Lit, create
+		ctx->Lit = lua_newthread(Lori);
+		ctx->refLit = luaL_ref(Lori, LUA_REGISTRYINDEX);
+	}
+}
 static int metafn_pairs_it(lua_State* L)
 {
 	void* tbCur = (void*)lua_topointer(L, 1);
 	// get ctx
 	lua_pushlightuserdata(L, tbCur);
-	lua_gettable(L, LUA_REGISTRYINDEX);
+	lua_rawget(L, LUA_REGISTRYINDEX);
 	struct table_ctx* ctx = (struct table_ctx*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
 	//
 	struct share_table* rootCtx = ctx->rootCtx;
 	lua_State* Lori = rootCtx->L;
-	int& itCnt = ctx->itCnt;
 	lua_State* Lit = ctx->Lit;
+	int16_t& itNotInit = ctx->itNotInit;
 	std::lock_guard<std::mutex> lock(rootCtx->mtx);
-	if(Lit == nullptr){  // no L for it, create
-		lua_pushlightuserdata(Lori, tbCur);
-		Lit = lua_newthread(Lori);
-		lua_settable(Lori, LUA_REGISTRYINDEX);  //keep Lit alive
-		ctx->Lit = Lit;
+	if(Lit == nullptr){  // no Lit, gain from Lori
+		gain_Lit(ctx, rootCtx, Lori);
+		Lit = ctx->Lit;
 	}else{
-		if(itCnt == 0){   // 1st it, clear Lit
+		if(itNotInit){   // clear cur Lit
 			lua_pop(Lit, lua_gettop(Lit));  
 		}
 	}
-	if(itCnt++ == 0){  // it start, init
+	if(itNotInit){  // it start, init
 		lua_pushlightuserdata(Lit, ctx->tbOri);  // get table
 		lua_pushnil(Lit);
+		itNotInit = 0;
 	}
 	if(lua_next(Lit, -2) != 0){  // has val
-		
+		// fetch key
+		int tp = lua_type(Lit, -2);
+		if(tp == LUA_TSTRING){
+			lua_pushstring(L, lua_tostring(Lit, -2));
+		}else if(tp == LUA_TNUMBER){
+			if(lua_isinteger(Lit, -2)){
+				lua_pushinteger(L, lua_tointeger(Lit, -2));
+			}else{
+				lua_pushnumber(L, lua_tonumber(Lit, -2));
+			}
+		}else{
+			return luaL_error(L, "sharetable pairs unsupport keyType: %s", lua_typename(L, tp));
+		}
+		// check if table has set the kv pair
+		lua_pushvalue(L, -1); // cp key to the top
+		if(lua_rawget(L, 1) == LUA_TNIL){   // kv not set, fetch val from Lit
+			lua_pop(L, 1);  // pop the result(nil) of lua_rawget
+			lua_pushvalue(L, -1);  // cp key to the top
+			// fetch val
+			tp = lua_type(Lit, -1);
+			if (tp == LUA_TSTRING) {
+				const char* val = lua_tostring(Lit, -1);
+				lua_pushstring(L, val);
+				lua_rawset(L, 1);   // set kv to table
+				lua_pushstring(L, val);
+			} else if (tp == LUA_TNUMBER) {
+				if (lua_isinteger(Lit, -1)) {
+					int val = lua_tointeger(Lit, -1);
+					lua_pushinteger(L, val);
+					lua_rawset(L, 1);   // set kv to table
+					lua_pushinteger(L, val);
+				} else {
+					lua_Number val = lua_tonumber(Lit, -1);
+					lua_pushnumber(L, val);
+					lua_rawset(L, 1);   // set kv to table
+					lua_pushnumber(L, val);
+				}
+			} else if (tp == LUA_TTABLE) {
+				void* tbOri = (void*)lua_topointer(Lit, -1);
+				lua_pushvalue(Lit, -1);  // cp table to the top
+				lua_pushlightuserdata(Lit, tbOri);
+				lua_insert(Lit, -2);  // mv tbOri below table
+				lua_rawset(Lit, LUA_REGISTRYINDEX);  // keep tbOri alive
+				//
+				create_proxy_table(L, tbOri, rootCtx);    // now, new tbProxy on the top
+				lua_pushvalue(L, -1); // copy tbProxy to top
+				lua_insert(L, -3);    // mv top tbProxy below table and key
+				lua_rawset(L, 1);  // set tbProxy to tbParent
+			} else if (tp == LUA_TBOOLEAN) {
+				int val = lua_toboolean(Lit, -1);
+				lua_pushboolean(L, val);
+				lua_rawset(L, 1);   // set kv to table
+				lua_pushboolean(L, val);
+			} else {  // treat as nil
+				//lua_pop(L, 1);  // pop the cp key (no need actually)
+				lua_pushnil(L);
+			}
+		}else{  // kv has set, no need fetch from Lit
+			int n = 1;  // debug
+		}
+		lua_pop(Lit, 1);  // pop val from Lit for next it
+		return 2;
 	}else{ // it done
 		ctx->itAllDone = 1;
-		// rm Lit?
+		// free Lit
+		free_Lit(ctx, rootCtx);
 		return 0;
 	}
-	return 2;
 }
 static int metafn_pairs(lua_State* L)
 {
 	void* tbCur = (void*)lua_topointer(L, 1);
 	// get ctx
 	lua_pushlightuserdata(L, tbCur);
-	lua_gettable(L, LUA_REGISTRYINDEX);
+	lua_rawget(L, LUA_REGISTRYINDEX);
 	struct table_ctx* ctx = (struct table_ctx*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
 	//
@@ -197,7 +284,7 @@ static int metafn_pairs(lua_State* L)
 		return 3;
 	}
 	//
-	ctx->itCnt = 0;   // reset itCnt
+	ctx->itNotInit = 1;   // reset 
 	lua_pushcfunction(L, metafn_pairs_it);
 	lua_pushvalue(L, 1);
 	return 2;
@@ -207,7 +294,7 @@ static int metafn_index(lua_State* L)
 	void* tbCur = (void*)lua_topointer(L, 1);
 	// get ctx
 	lua_pushlightuserdata(L, tbCur);
-	lua_gettable(L, LUA_REGISTRYINDEX);
+	lua_rawget(L, LUA_REGISTRYINDEX);
 	struct table_ctx* ctx = (struct table_ctx*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
 	//
@@ -221,9 +308,9 @@ static int metafn_index(lua_State* L)
 		// get val from tableOri
 		std::lock_guard<std::mutex> lock(rootCtx->mtx);
 		lua_pushlightuserdata(Lori, tbOri);
-		lua_gettable(Lori, LUA_REGISTRYINDEX);  // make tbOri to the top
+		lua_rawget(Lori, LUA_REGISTRYINDEX);  // make tbOri to the top
 		lua_pushstring(Lori, key);
-		tp = lua_gettable(Lori, -2);   // get value
+		tp = lua_rawget(Lori, -2);   // get value
 		return move_val(L, tp, rootCtx, Lori);
 	}else if(tp == LUA_TNUMBER){
 		int key = lua_tonumber(L, 2);
@@ -231,9 +318,9 @@ static int metafn_index(lua_State* L)
 		// get val from tableOri
 		std::lock_guard<std::mutex> lock(rootCtx->mtx);
 		lua_pushlightuserdata(Lori, tbOri);
-		lua_gettable(Lori, LUA_REGISTRYINDEX);  // make tbOri to the top
+		lua_rawget(Lori, LUA_REGISTRYINDEX);  // make tbOri to the top
 		lua_pushinteger(Lori, key);
-		tp = lua_gettable(Lori, -2);   // get value
+		tp = lua_rawget(Lori, -2);   // get value
 		return move_val(L, tp, rootCtx, Lori);
 	}
 	// treat as nil
@@ -272,7 +359,7 @@ static int share_load_file(struct share_table* tb, const char* file,
 	void* table = (void*)lua_topointer(L, -1);
 	lua_pushlightuserdata(L, table);
 	lua_insert(L, -2);
-	lua_settable(L, LUA_REGISTRYINDEX);   // keep rootTable alive
+	lua_rawset(L, LUA_REGISTRYINDEX);  // keep rootTable alive
 	//
 	tb->tbRoot = table;
 	return 1;
@@ -281,6 +368,7 @@ static inline struct share_table* new_share_table()
 {
 	struct share_table* tb = new struct share_table;
 	std::lock_guard<std::mutex> lock(tb->mtx);
+	tb->queFreeLitIdx = const_cast<struct pool_linked<int>*>(plk_create<int>());
 	tb->tbRoot = nullptr;
 	tb->L = luaL_newstate();
 	luaL_openlibs(tb->L);
@@ -293,6 +381,8 @@ static inline void destroy_share_table(struct share_table* tb)
 		lua_close(tb->L);
 		tb->L = nullptr;
 		tb->tbRoot = nullptr;
+		plk_destroy(tb->queFreeLitIdx);
+		tb->queFreeLitIdx = nullptr;
 	}
 	delete tb;
 }
@@ -327,19 +417,19 @@ static int proxy_query_root(lua_State* L, struct share_table* tb)
 	} else {  // metatable 1st set, init
 		lua_pushstring(L, "__index");
 		lua_pushcfunction(L, metafn_index);
-		lua_settable(L, -3);
+		lua_rawset(L, -3);
 		// set gc cb
 		lua_pushstring(L, "__gc");
 		lua_pushcfunction(L, metafn_gc);
-		lua_settable(L, -3);
+		lua_rawset(L, -3);
 		// set len cb
 		lua_pushstring(L, "__len");
 		lua_pushcfunction(L, metafn_len);
-		lua_settable(L, -3);
+		lua_rawset(L, -3);
 		// set paris cb
 		lua_pushstring(L, "__pairs");
 		lua_pushcfunction(L, metafn_pairs);
-		lua_settable(L, -3);
+		lua_rawset(L, -3);
 	}
 	lua_pop(L, 1); // pop metatable from curStack
 	create_proxy_table(L, tb->tbRoot, tb);
